@@ -132,6 +132,7 @@ class MsLightweaverManager:
         self.idx = 0
         self.nHTot = atmost.d1 / (self.abund.massPerH * Const.Amu)
         self.prd = prd
+        self.updateRhoPrd = False
         self.detailedH = detailedH
         # NOTE(cmo): If this is None and detailedH is True then the data from
         # atmost will be used, otherwise, an MsLw pickle will be loaded from
@@ -273,31 +274,7 @@ class MsLightweaverManager:
                     pAdv = p[i] * adv
                     p[i, :] = pAdv
         elif self.advectPops:
-            # z0 = self.atmost.z1[self.idx]
-            # z1 = self.atmost.z1[self.idx+1]
-            # d0 = self.atmost.d1[self.idx]
-            # d1 = self.atmost.d1[self.idx+1]
-            # vz0 = self.atmost.vz1[self.idx]
-            # vz1 = self.atmost.vz1[self.idx+1]
-            # dt = self.atmost.dt[self.idx+1]
-
-            # z0m = z0 + 0.5 * vz0 * dt
-            # z0Tracer = z0 + interp1d(z1, vz1, kind=3, fill_value='extrapolate')(z0m) * dt
-
-            # densityAdv = d1 / d0
-            # for atom in self.aSet.activeAtoms:
-            #     p = self.eqPops[atom.name]
-            #     for i in range(p.shape[0]):
-            #         p0 = p[i, :]
-            #         p[i, :] = 10**(interp1d(z0Tracer, np.log10(p0), kind=3, fill_value='extrapolate')(z1))
-            #     nTotal = self.eqPops.atomicPops[atom.name].nTotal
-            #     nTotalAdv = nTotal * densityAdv
-            #     p *= nTotalAdv / p.sum(axis=0)
-
-            # advect(self.atmost, self.idx, self.eqPops, [a.name for a in self.aSet.activeAtoms], self.at)
             nr_advect(self.atmost, self.idx, self.eqPops, [a.element for a in self.aSet.activeAtoms], self.abund)
-            # pass
-
             # NOTE(cmo): Guess advected n_e. Will be corrected to be self
             # consistent later (in update_deps if conserveCharge=True). If
             # conserveCharge isn't true then we're using loaded n_e anyway
@@ -384,9 +361,26 @@ class MsLightweaverManager:
         self.ctx.update_deps()
         if self.prd:
             self.ctx.update_hprd_coeffs()
+            self.updateRhoPrd = False
+            self.interp_rho_prd()
         if self.downgoingRadiation:
             self.upperBc.set_bc(self.downgoingRadiation.compute_downgoing_radiation(self.spect.wavelength, self.atmos))
         # self.opac_background()
+
+    def interp_rho_prd(self):
+        prevIdx = self.idx - 1
+        prevZ = self.atmost.z1[prevIdx]
+        z = self.atmost.z1[self.idx]
+
+        for atom in self.ctx.activeAtoms:
+            for trans in atom.trans:
+                try:
+                    trans.rhoPrd
+                    for la in range(trans.rhoPrd.shape[0]):
+                        trans.rhoPrd[la, :] = weno4(z, prevZ, trans.rhoPrd[la])
+                    trans.rhoPrd[trans.rhoPrd < 0] = 1e-5
+                except AttributeError:
+                    pass
 
     def time_dep_prev_state(self, evalGamma=False):
         if evalGamma:
@@ -425,113 +419,27 @@ class MsLightweaverManager:
                     except:
                         pass
 
-            self.ctx.update_hprd_coeffs()
-            self.ctx.formal_sol_gamma_matrices()
-            self.ctx.prd_redistribute(200)
-
         prevState = self.time_dep_prev_state(evalGamma=(theta!=1.0))
         for sub in range(nSubSteps):
-            # self.JPrev[:] = self.ctx.spect.J
-            if self.prd and sub > 1:
-                if delta > 5e-1:
-                    # self.ctx.prd_redistribute(maxIter=2, tol=5e-1)
-                    pass
-                else:
-                    self.ctx.prd_redistribute(maxIter=5, tol=min(1e-1, 10*delta))
+            if self.updateRhoPrd and sub > 0:
+                dRho, prdIter = self.ctx.prd_redistribute(maxIter=5, tol=popsTol)
 
             dJ = self.ctx.formal_sol_gamma_matrices()
-            # if sub > 2:
-            # delta, prevState = self.ctx.time_dep_update(dt, prevState)
             delta = self.time_dep_update(dt, prevState, theta=theta)
-            # for ia, atom in enumerate(self.ctx.activeAtoms):
-            #     nDag = np.copy(atom.n)
-            #     print(atom.atomicModel.name)
-            #     gml = np.zeros_like(atom.n)
-            #     for i in range(atom.n.shape[0]):
-            #         for k in range(atom.n.shape[1]):
-            #             gml[i, k] = atom.Gamma[i, :, k] @ atom.n[:, k]
-
-            #     for i in range(atom.n.shape[0]):
-            #         atom.n[i, :] = an_gml_sol(self.atmost, self.idx, prevState['pops'][ia][i], atom.n[i], gml[i], tol=1e-8)
-
-            #     advChange = np.abs(nDag - atom.n) / nDag
-            #     print('advChange: %.3e' % advChange.max())
-
-
-            #     # delta = an_rad_sol(self.atmost, self.idx, prevState['pops'][ia], atom.n, atom.nTotal, atom.Gamma)
-
-            # pdb.set_trace()
-            # delta = advChange.max()
-            if delta > 5e-1:
-                # underTol = False
-                continue
-            if not underTol:
-                underTol = True
-                if sub > 0 and self.conserveCharge:
-                    # self.eqPops.update_lte_atoms_Hmin_pops(self.atmos, True, True)
-                    self.ctx.update_deps()
-                    # if self.prd:
-                        # self.ctx.configure_hprd_coeffs()
-
             if self.conserveCharge:
                 dNrPops = self.ctx.nr_post_update(timeDependentData={'dt': dt, 'nPrev': prevState['pops']})
-
-
 
             if sub > 1 and ((delta < popsTol and dJ < JTol and dNrPops < popsTol)
                             or (delta < 0.1*popsTol and dNrPops < 0.1*popsTol)
                             or (dJ < 1e-6)):
-                break
+                if self.updateRhoPrd and dRho < JTol:
+                    break
+                else:
+                    print('Starting PRD Iterations')
+                    self.updateRhoPrd = True
         else:
-            self.ctx.depthData.fill = True
-            self.ctx.formal_sol_gamma_matrices()
-            self.ctx.depthData.fill = False
+            raise ValueError('NON-CONVERGED')
 
-            sourceData = {
-                'chi': np.copy(self.ctx.depthData.chi),
-                'eta': np.copy(self.ctx.depthData.eta),
-                'chiBg': np.copy(self.ctx.background.chi),
-                'etaBg': np.copy(self.ctx.background.eta),
-                'scaBg': np.copy(self.ctx.background.sca),
-                'J': np.copy(self.ctx.spect.J)
-                         }
-            with open(self.outputDir + 'Fails.txt', 'a') as f:
-                f.write('%d, %.4e %.4e\n' % (self.idx, delta, dJ))
-
-            with open(self.outputDir + 'NonConvergenceData_%.6d.pickle' % (self.idx), 'wb') as pkl:
-                pickle.dump(sourceData, pkl)
-
-            print('NON-CONVERGED')
-        # self.ctx.time_dep_conserve_charge(prevState)
-
-
-    # def time_dep_step(self, nSubSteps=200, popsTol=1e-3, JTol=3e-3, theta=0.5):
-    #     dt = self.atmost.dt[self.idx+1]
-    #     dNrPops = 0.0
-    #     underTol = False
-
-    #     prevState = self.time_dep_prev_state()
-    #     for sub in range(nSubSteps):
-    #         dJ = self.ctx.formal_sol_gamma_matrices()
-    #         delta = self.time_dep_update(0.5 * dt, prevState, theta=theta)
-    #         if sub > 1 and ((delta < popsTol and dJ < JTol and dNrPops < popsTol)
-    #                         or (delta < 0.1*popsTol and dNrPops < 0.1*popsTol)
-    #                         or (dJ < 1e-6)):
-    #             break
-
-    #     print('-'*80)
-    #     print('ADVECTING')
-    #     print('-'*80)
-    #     nr_advect(self.atmost, self.idx, self.eqPops, [a.name for a in self.aSet.activeAtoms], self.at)
-
-    #     prevState = self.time_dep_prev_state()
-    #     for sub in range(nSubSteps):
-    #         dJ = self.ctx.formal_sol_gamma_matrices()
-    #         delta = self.time_dep_update(0.5 * dt, prevState, theta=theta)
-    #         if sub > 1 and ((delta < popsTol and dJ < JTol and dNrPops < popsTol)
-    #                         or (delta < 0.1*popsTol and dNrPops < 0.1*popsTol)
-    #                         or (dJ < 1e-6)):
-    #             break
 
     def cont_fn_data(self, step):
         self.load_timestep(step)

@@ -16,7 +16,7 @@ from ReadAtmost import read_atmost
 # threadpool_limits(1)
 from RadynEmistab import EmisTable
 
-OutputDir = 'TimestepsAllNoNonThermHNoLybb/'
+OutputDir = 'TimestepsAllNewPrd/'
 Path(OutputDir).mkdir(parents=True, exist_ok=True)
 Path(OutputDir + '/Rfs').mkdir(parents=True, exist_ok=True)
 Path(OutputDir + '/ContFn').mkdir(parents=True, exist_ok=True)
@@ -31,16 +31,16 @@ FchromaNoLybbAtoms = [H_6_noLybb(), CaII(), He_9_atom(), C_atom(), O_atom(), Si_
 FchromaNoLybbbfAtoms = [H_6_noLybbbf(), CaII(), He_9_atom(), C_atom(), O_atom(), Si_atom(), Fe_atom(),
                 MgII_atom(), N_atom(), Na_atom(), S_atom()]
 FchromaNoHbbNoContAtoms = [H_6_nobb(), CaII(), He_9_atom()]
-AtomSet = FchromaNoLybbAtoms
+AtomSet = FchromaAtoms
 
 # Removing Fang rates
 del AtomSet[0].collisions[-1]
 lw.atomic_model.reconfigure_atom(AtomSet[0])
 
-ConserveCharge = False
+ConserveCharge = True
 PopulationTransportMode = 'Advect'
-Prd = False
-DetailedH = True
+Prd = True
+DetailedH = False
 DetailedHPath = 'TimestepsAllNoNonThermH/'
 # CoronalIrradiation = EmisTable('emistab.dat')
 CoronalIrradiation = None
