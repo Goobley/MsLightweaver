@@ -414,7 +414,7 @@ class MsLightweaverManager:
             for atom in self.ctx.activeAtoms:
                 for t in atom.trans:
                     try:
-                        t.rhoPrd.fill(1.0)
+                        # t.rhoPrd.fill(1.0)
                         t.gII[0,0,0] = -1.0
                     except:
                         pass
@@ -430,8 +430,7 @@ class MsLightweaverManager:
                 dNrPops = self.ctx.nr_post_update(timeDependentData={'dt': dt, 'nPrev': prevState['pops']})
 
             if sub > 1 and ((delta < popsTol and dJ < JTol and dNrPops < popsTol)
-                            or (delta < 0.1*popsTol and dNrPops < 0.1*popsTol)
-                            or (dJ < 1e-6)):
+                            or (delta < 0.1*popsTol and dNrPops < 0.1*popsTol)):
                 if self.updateRhoPrd and dRho < JTol:
                     break
                 else:
