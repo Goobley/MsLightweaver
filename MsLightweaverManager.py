@@ -413,11 +413,7 @@ class MsLightweaverManager:
         if self.prd:
             for atom in self.ctx.activeAtoms:
                 for t in atom.trans:
-                    try:
-                        # t.rhoPrd.fill(1.0)
-                        t.gII[0,0,0] = -1.0
-                    except:
-                        pass
+                    t.recompute_gII()
 
         prevState = self.time_dep_prev_state(evalGamma=(theta!=1.0))
         for sub in range(nSubSteps):
