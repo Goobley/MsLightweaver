@@ -418,7 +418,7 @@ class MsLightweaverManager:
         prevState = self.time_dep_prev_state(evalGamma=(theta!=1.0))
         for sub in range(nSubSteps):
             if self.updateRhoPrd and sub > 0:
-                dRho, prdIter = self.ctx.prd_redistribute(maxIter=5, tol=popsTol)
+                dRho, prdIter = self.ctx.prd_redistribute(maxIter=10, tol=popsTol)
 
             dJ = self.ctx.formal_sol_gamma_matrices()
             delta = self.time_dep_update(dt, prevState, theta=theta)
@@ -427,11 +427,14 @@ class MsLightweaverManager:
 
             if sub > 1 and ((delta < popsTol and dJ < JTol and dNrPops < popsTol)
                             or (delta < 0.1*popsTol and dNrPops < 0.1*popsTol)):
-                if self.updateRhoPrd and dRho < JTol:
-                    break
+                if self.prd: 
+                    if self.updateRhoPrd and dRho < JTol:
+                        break
+                    else:
+                        print('Starting PRD Iterations')
+                        self.updateRhoPrd = True
                 else:
-                    print('Starting PRD Iterations')
-                    self.updateRhoPrd = True
+                    break
         else:
             raise ValueError('NON-CONVERGED')
 
@@ -464,13 +467,15 @@ class MsLightweaverManager:
         else:
             self.ctx.spect.J[:] = 0.0
 
-        self.atmos.temperature[k] += 0.5 * pertSize
-        self.ctx.update_deps()
-
         if Jstart is None:
             dJ = 1.0
             while dJ > 1e-3:
                 dJ = self.ctx.formal_sol_gamma_matrices()
+            Jstart = np.copy(self.ctx.spect.J)
+                
+        self.atmos.temperature[k] += 0.5 * pertSize
+        self.ctx.update_deps()
+
         self.time_dep_step(popsTol=1e-3, JTol=5e-3, dt=dt, theta=1.0)
         plus = np.copy(self.ctx.spect.I[:, -1])
 
@@ -480,14 +485,96 @@ class MsLightweaverManager:
             self.ctx.spect.J[:] = Jstart
         else:
             self.ctx.spect.J[:] = 0.0
-
+        
         self.atmos.temperature[k] -= 0.5 * pertSize
         self.ctx.update_deps()
+
+        # if Jstart is None:
+            # dJ = 1.0
+            # while dJ > 1e-3:
+                # dJ = self.ctx.formal_sol_gamma_matrices()
+        self.time_dep_step(popsTol=1e-3, JTol=5e-3, dt=dt, theta=1.0)
+        minus = np.copy(self.ctx.spect.I[:, -1])
+
+        return plus, minus
+    
+    def rf_ne_k(self, step, dt, pertSizePercent, k, Jstart=None):
+        self.load_timestep(step)
+        print(pertSizePercent)
+
+        self.ctx.clear_ng()
+        if Jstart is not None:
+            self.ctx.spect.J[:] = Jstart
+        else:
+            self.ctx.spect.J[:] = 0.0
 
         if Jstart is None:
             dJ = 1.0
             while dJ > 1e-3:
                 dJ = self.ctx.formal_sol_gamma_matrices()
+            Jstart = np.copy(self.ctx.spect.J)
+                
+        self.atmos.ne[k] += 0.5 * pertSizePercent * self.atmos.ne[k]
+        self.ctx.update_deps()
+
+        self.time_dep_step(popsTol=1e-3, JTol=5e-3, dt=dt, theta=1.0)
+        plus = np.copy(self.ctx.spect.I[:, -1])
+
+        self.load_timestep(step)
+        self.ctx.clear_ng()
+        if Jstart is not None:
+            self.ctx.spect.J[:] = Jstart
+        else:
+            self.ctx.spect.J[:] = 0.0
+        
+        self.atmos.ne[k] -= 0.5 * pertSizePercent * self.atmos.ne[k]
+        self.ctx.update_deps()
+
+        # if Jstart is None:
+            # dJ = 1.0
+            # while dJ > 1e-3:
+                # dJ = self.ctx.formal_sol_gamma_matrices()
+        self.time_dep_step(popsTol=1e-3, JTol=5e-3, dt=dt, theta=1.0)
+        minus = np.copy(self.ctx.spect.I[:, -1])
+
+        return plus, minus
+    
+    def rf_vlos_k(self, step, dt, pertSize, k, Jstart=None):
+        self.load_timestep(step)
+        print(pertSize)
+
+        self.ctx.clear_ng()
+        if Jstart is not None:
+            self.ctx.spect.J[:] = Jstart
+        else:
+            self.ctx.spect.J[:] = 0.0
+
+        if Jstart is None:
+            dJ = 1.0
+            while dJ > 1e-3:
+                dJ = self.ctx.formal_sol_gamma_matrices()
+            Jstart = np.copy(self.ctx.spect.J)
+                
+        self.atmos.vlos[k] += 0.5 * pertSize
+        self.ctx.update_deps()
+
+        self.time_dep_step(popsTol=1e-3, JTol=5e-3, dt=dt, theta=1.0)
+        plus = np.copy(self.ctx.spect.I[:, -1])
+
+        self.load_timestep(step)
+        self.ctx.clear_ng()
+        if Jstart is not None:
+            self.ctx.spect.J[:] = Jstart
+        else:
+            self.ctx.spect.J[:] = 0.0
+        
+        self.atmos.vlos[k] -= 0.5 * pertSize
+        self.ctx.update_deps()
+
+        # if Jstart is None:
+            # dJ = 1.0
+            # while dJ > 1e-3:
+                # dJ = self.ctx.formal_sol_gamma_matrices()
         self.time_dep_step(popsTol=1e-3, JTol=5e-3, dt=dt, theta=1.0)
         minus = np.copy(self.ctx.spect.I[:, -1])
 

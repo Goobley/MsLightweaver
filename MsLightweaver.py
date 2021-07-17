@@ -16,7 +16,7 @@ from ReadAtmost import read_atmost
 # threadpool_limits(1)
 from RadynEmistab import EmisTable
 
-OutputDir = 'TimestepsAllPrdBroadening/'
+OutputDir = 'TimestepsAllPrdBroadening10SubIterFineGrid/'
 Path(OutputDir).mkdir(parents=True, exist_ok=True)
 Path(OutputDir + '/Rfs').mkdir(parents=True, exist_ok=True)
 Path(OutputDir + '/ContFn').mkdir(parents=True, exist_ok=True)
