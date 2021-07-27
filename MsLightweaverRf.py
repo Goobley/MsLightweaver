@@ -10,7 +10,7 @@ from lightweaver.utils import InitialSolution
 import lightweaver.constants as Const
 from typing import List
 from copy import deepcopy
-from MsLightweaverAtoms import H_6, CaII, H_6_nasa, CaII_nasa
+from MsLightweaverAtoms import H_6, CaII, H_6_noLybb, H_6_nasa, CaII_nasa
 import os
 import os.path as path
 import time
@@ -24,17 +24,21 @@ from MsLightweaverManager import MsLightweaverManager
 from MsLightweaverUtil import test_timesteps_in_dir, optional_load_starting_context, kill_child_processes
 from ReadAtmost import read_atmost
 
-OutputDir = 'TimestepsAdvNrLosses/'
+OutputDir = 'TimestepsNoLybbLosses/'
 Path(OutputDir).mkdir(parents=True, exist_ok=True)
 Path(OutputDir + '/Rfs').mkdir(parents=True, exist_ok=True)
 Path(OutputDir + '/ContFn').mkdir(parents=True, exist_ok=True)
 NasaAtoms = [H_6_nasa(), CaII_nasa(), He_9_atom(), C_atom(), O_atom(), Si_atom(), Fe_atom(),
              MgII_atom(), N_atom(), Na_atom(), S_atom()]
+FchromaNoLybbAtoms = [H_6_noLybb(), CaII(), He_9_atom(), C_atom(), O_atom(), 
+                     Si_atom(), Fe_atom(), MgII_atom(), N_atom(), Na_atom(), S_atom()]
 FchromaAtoms = [H_6(), CaII(), He_9_atom(), C_atom(), O_atom(), Si_atom(), Fe_atom(),
                 MgII_atom(), N_atom(), Na_atom(), S_atom()]
-AtomSet = FchromaAtoms
-ConserveCharge = True
+AtomSet = FchromaNoLybbAtoms
+ConserveCharge = False
 PopulationTransportMode = 'Advect'
+DetailedH = True
+DetailedHPath = 'TimestepsAdvNrLosses'
 Prd = False
 MaxProcesses = -1
 if MaxProcesses < 0:
@@ -60,6 +64,7 @@ start = time.time()
 ms = MsLightweaverManager(atmost=atmost, outputDir=OutputDir,
                           atoms=AtomSet,
                           activeAtoms=['H', 'Ca'], startingCtx=startingCtx,
+                          detailedH=DetailedH, detailedHPath=DetailedHPath,
                           conserveCharge=ConserveCharge,
                           populationTransportMode=PopulationTransportMode,
                           prd=Prd)
