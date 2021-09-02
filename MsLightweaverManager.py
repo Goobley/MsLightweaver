@@ -443,7 +443,7 @@ class MsLightweaverManager:
         self.load_timestep(step)
         self.ctx.depthData.fill = True
         dJ = 1.0
-        while dJ > 1e-3:
+        while dJ > 1e-5:
             dJ = self.ctx.formal_sol_gamma_matrices()
         self.ctx.depthData.fill = False
         J = np.copy(self.ctx.spect.J)
@@ -476,7 +476,7 @@ class MsLightweaverManager:
         self.atmos.temperature[k] += 0.5 * pertSize
         self.ctx.update_deps()
 
-        self.time_dep_step(popsTol=1e-3, JTol=5e-3, dt=dt, theta=1.0)
+        self.time_dep_step(popsTol=1e-4, JTol=5e-3, dt=dt, theta=1.0)
         plus = np.copy(self.ctx.spect.I[:, -1])
 
         self.load_timestep(step)
@@ -493,7 +493,60 @@ class MsLightweaverManager:
             # dJ = 1.0
             # while dJ > 1e-3:
                 # dJ = self.ctx.formal_sol_gamma_matrices()
-        self.time_dep_step(popsTol=1e-3, JTol=5e-3, dt=dt, theta=1.0)
+        self.time_dep_step(popsTol=1e-4, JTol=5e-3, dt=dt, theta=1.0)
+        minus = np.copy(self.ctx.spect.I[:, -1])
+
+        return plus, minus
+    
+    def rf_k_stat_eq(self, step, dt, pertSize, k, Jstart=None):
+        self.load_timestep(step)
+        print(pertSize)
+
+        self.ctx.clear_ng()
+        if Jstart is not None:
+            self.ctx.spect.J[:] = Jstart
+        else:
+            self.ctx.spect.J[:] = 0.0
+
+        if Jstart is None:
+            dJ = 1.0
+            while dJ > 1e-3:
+                dJ = self.ctx.formal_sol_gamma_matrices()
+            Jstart = np.copy(self.ctx.spect.J)
+                
+        self.atmos.temperature[k] += 0.5 * pertSize
+        self.ctx.update_deps()
+
+        # self.time_dep_step(popsTol=1e-4, JTol=5e-3, dt=dt, theta=1.0)
+        while True:
+            self.ctx.formal_sol_gamma_matrices()
+            dPops = self.ctx.stat_equil()
+            if dPops < 1e-4:
+                break
+            
+        plus = np.copy(self.ctx.spect.I[:, -1])
+
+        self.load_timestep(step)
+        self.ctx.clear_ng()
+        if Jstart is not None:
+            self.ctx.spect.J[:] = Jstart
+        else:
+            self.ctx.spect.J[:] = 0.0
+        
+        self.atmos.temperature[k] -= 0.5 * pertSize
+        self.ctx.update_deps()
+
+        # if Jstart is None:
+            # dJ = 1.0
+            # while dJ > 1e-3:
+                # dJ = self.ctx.formal_sol_gamma_matrices()
+        # self.time_dep_step(popsTol=1e-4, JTol=5e-3, dt=dt, theta=1.0)
+        while True:
+            self.ctx.formal_sol_gamma_matrices()
+            dPops = self.ctx.stat_equil()
+            if dPops < 1e-4:
+                break
+            
         minus = np.copy(self.ctx.spect.I[:, -1])
 
         return plus, minus

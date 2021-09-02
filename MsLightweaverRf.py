@@ -24,7 +24,7 @@ from MsLightweaverManager import MsLightweaverManager
 from MsLightweaverUtil import test_timesteps_in_dir, optional_load_starting_context, kill_child_processes
 from ReadAtmost import read_atmost
 
-OutputDir = 'TimestepsNoLybbLosses/'
+OutputDir = 'TimestepsAdvNrLosses/'
 Path(OutputDir).mkdir(parents=True, exist_ok=True)
 Path(OutputDir + '/Rfs').mkdir(parents=True, exist_ok=True)
 Path(OutputDir + '/ContFn').mkdir(parents=True, exist_ok=True)
@@ -34,10 +34,10 @@ FchromaNoLybbAtoms = [H_6_noLybb(), CaII(), He_9_atom(), C_atom(), O_atom(),
                      Si_atom(), Fe_atom(), MgII_atom(), N_atom(), Na_atom(), S_atom()]
 FchromaAtoms = [H_6(), CaII(), He_9_atom(), C_atom(), O_atom(), Si_atom(), Fe_atom(),
                 MgII_atom(), N_atom(), Na_atom(), S_atom()]
-AtomSet = FchromaNoLybbAtoms
-ConserveCharge = False
+AtomSet = FchromaAtoms
+ConserveCharge = True
 PopulationTransportMode = 'Advect'
-DetailedH = True
+DetailedH = False
 DetailedHPath = 'TimestepsAdvNrLosses'
 Prd = False
 MaxProcesses = -1
@@ -80,7 +80,8 @@ pertSize = 50
 pertSizeNePercent = 0.005
 pertSizeVlos = 20
 # dts = [5e-4, 1e-3]
-dts = [1e-3, 1e-5]
+dts = [1e-3, 1e-5, 1e-8]
+dts = [1.0]
 step = 545
 Nspace = ms.atmos.height.shape[0]
 
@@ -91,6 +92,10 @@ def shush(fn, *args, **kwargs):
 
 def rf_k(k, dt, Jstart=None):
     plus, minus = ms.rf_k(step, dt, pertSize, k, Jstart=Jstart)
+    return plus, minus
+
+def rf_k_se(k, dt, Jstart=None):
+    plus, minus = ms.rf_k_stat_eq(step, dt, pertSize, k, Jstart=Jstart)
     return plus, minus
 
 def rf_ne_k(k, dt, Jstart=None):
@@ -116,7 +121,7 @@ if __name__ == '__main__':
             print('Temperature')
             with ProcessPoolExecutor(max_workers=maxCpus) as exe:
                 try:
-                    futures = [exe.submit(shush, rf_k, k, dt, Jstart=contData['J']) for k in range(Nspace)]
+                    futures = [exe.submit(shush, rf_k_se, k, dt, Jstart=contData['J']) for k in range(Nspace)]
 
                     for f in tqdm(as_completed(futures), total=len(futures)):
                         pass
@@ -161,26 +166,26 @@ if __name__ == '__main__':
             # with open(OutputDir + 'Rfs/Rf_ne_%.2e_%.2e_%d.pickle' % (pertSizeNePercent, dt, step), 'wb') as pkl:
                 # pickle.dump({'rf': rf, 'pertSizePercent': pertSizeNePercent, 'dt': dt, 'step': step}, pkl)
             
-            print('vlos')
-            with ProcessPoolExecutor(max_workers=maxCpus) as exe:
-                try:
-                    futures = [exe.submit(shush, rf_vlos_k, k, dt, Jstart=contData['J']) for k in range(Nspace)]
+            # print('vlos')
+            # with ProcessPoolExecutor(max_workers=maxCpus) as exe:
+                # try:
+                    # futures = [exe.submit(shush, rf_vlos_k, k, dt, Jstart=contData['J']) for k in range(Nspace)]
 
-                    for f in tqdm(as_completed(futures), total=len(futures)):
-                        pass
-                except KeyboardInterrupt:
-                    exe.shutdown(wait=False)
-                    kill_child_processes(os.getpid())
+                    # for f in tqdm(as_completed(futures), total=len(futures)):
+                        # pass
+                # except KeyboardInterrupt:
+                    # exe.shutdown(wait=False)
+                    # kill_child_processes(os.getpid())
 
 
-            rfPlus = np.zeros((Nspace, ms.ctx.spect.wavelength.shape[0]))
-            rfMinus = np.zeros((Nspace, ms.ctx.spect.wavelength.shape[0]))
+            # rfPlus = np.zeros((Nspace, ms.ctx.spect.wavelength.shape[0]))
+            # rfMinus = np.zeros((Nspace, ms.ctx.spect.wavelength.shape[0]))
 
-            for k, f in enumerate(futures):
-                res = f.result()
-                rfPlus[k, :] = res[0]
-                rfMinus[k, :] = res[1]
+            # for k, f in enumerate(futures):
+                # res = f.result()
+                # rfPlus[k, :] = res[0]
+                # rfMinus[k, :] = res[1]
 
-            rf = (rfPlus - rfMinus) / pertSize
-            with open(OutputDir + 'Rfs/Rf_vlos_%.2e_%.2e_%d.pickle' % (pertSizeVlos, dt, step), 'wb') as pkl:
-                pickle.dump({'rf': rf, 'pertSize': pertSizeVlos, 'dt': dt, 'step': step}, pkl)
+            # rf = (rfPlus - rfMinus) / pertSize
+            # with open(OutputDir + 'Rfs/Rf_vlos_%.2e_%.2e_%d.pickle' % (pertSizeVlos, dt, step), 'wb') as pkl:
+                # pickle.dump({'rf': rf, 'pertSize': pertSizeVlos, 'dt': dt, 'step': step}, pkl)
