@@ -521,7 +521,7 @@ class MsLightweaverManager:
         while True:
             self.ctx.formal_sol_gamma_matrices()
             dPops = self.ctx.stat_equil()
-            if dPops < 1e-4:
+            if dPops < 1e-5 and dPops != 0.0: 
                 break
             
         plus = np.copy(self.ctx.spect.I[:, -1])
@@ -544,7 +544,7 @@ class MsLightweaverManager:
         while True:
             self.ctx.formal_sol_gamma_matrices()
             dPops = self.ctx.stat_equil()
-            if dPops < 1e-4:
+            if dPops < 1e-5 and dPops != 0.0:
                 break
             
         minus = np.copy(self.ctx.spect.I[:, -1])

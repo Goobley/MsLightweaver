@@ -35,9 +35,9 @@ FchromaNoLybbAtoms = [H_6_noLybb(), CaII(), He_9_atom(), C_atom(), O_atom(),
 FchromaAtoms = [H_6(), CaII(), He_9_atom(), C_atom(), O_atom(), Si_atom(), Fe_atom(),
                 MgII_atom(), N_atom(), Na_atom(), S_atom()]
 AtomSet = FchromaAtoms
-ConserveCharge = True
+ConserveCharge = False
 PopulationTransportMode = 'Advect'
-DetailedH = False
+DetailedH = True
 DetailedHPath = 'TimestepsAdvNrLosses'
 Prd = False
 MaxProcesses = -1
@@ -81,7 +81,10 @@ pertSizeNePercent = 0.005
 pertSizeVlos = 20
 # dts = [5e-4, 1e-3]
 dts = [1e-3, 1e-5, 1e-8]
-dts = [1.0]
+dts = [1.0e10]
+dts = [1.1e-2, 1.1e-3, 1.1e-4, 1.1e-6]
+# dts = [1e3]
+
 step = 545
 Nspace = ms.atmos.height.shape[0]
 
@@ -121,7 +124,7 @@ if __name__ == '__main__':
             print('Temperature')
             with ProcessPoolExecutor(max_workers=maxCpus) as exe:
                 try:
-                    futures = [exe.submit(shush, rf_k_se, k, dt, Jstart=contData['J']) for k in range(Nspace)]
+                    futures = [exe.submit(shush, rf_k, k, dt, Jstart=contData['J']) for k in range(Nspace)]
 
                     for f in tqdm(as_completed(futures), total=len(futures)):
                         pass
