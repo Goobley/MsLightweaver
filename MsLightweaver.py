@@ -16,7 +16,7 @@ from ReadAtmost import read_atmost
 # threadpool_limits(1)
 from RadynEmistab import EmisTable
 
-OutputDir = 'TimestepsAllPrdBroadening10SubIterFineGrid/'
+OutputDir = 'MsTimesteps/'
 Path(OutputDir).mkdir(parents=True, exist_ok=True)
 Path(OutputDir + '/Rfs').mkdir(parents=True, exist_ok=True)
 Path(OutputDir + '/ContFn').mkdir(parents=True, exist_ok=True)
@@ -34,14 +34,14 @@ FchromaNoLybbbfAtoms = [H_6_noLybbbf(), CaII(), He_9_atom(), C_atom(), O_atom(),
                 MgII_atom(), N_atom(), Na_atom(), S_atom()]
 FchromaNoHbbNoContAtoms = [H_6_nobb(), CaII(), He_9_atom()]
 
-AtomSet = FchromaPrdAtoms
+AtomSet = FchromaAtoms
 
 DisableFangRates = False
 ConserveCharge = True
 PopulationTransportMode = 'Advect'
-Prd = True
+Prd = False
 DetailedH = False
-DetailedHPath = 'TimestepsAllNoNonThermH/'
+DetailedHPath = None
 # CoronalIrradiation = EmisTable('emistab.dat')
 CoronalIrradiation = None
 ActiveAtoms = ['H', 'Ca']
@@ -88,11 +88,6 @@ if ConserveCharge and 'He' in ActiveAtoms:
     ms.ctx.eqPops['He'][...] = msFixedNe.ctx.eqPops['He']
 ms.initial_stat_eq(popTol=1e-3, Nscatter=20)
 ms.save_timestep()
-
-# NOTE(cmo): Due to monkey-patching we can't reload the context currently
-# if startingCtx is None:
-#     with open(OutputDir + 'StartingContext.pickle', 'wb') as pkl:
-#         pickle.dump(ms.ctx, pkl)
 
 maxSteps = ms.atmost.time.shape[0] - 1
 ms.atmos.bHeat[:] = ms.atmost.bheat1[0]
