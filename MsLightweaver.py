@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from lightweaver.rh_atoms import H_6_atom, C_atom, O_atom, OI_ord_atom, Si_atom, Al_atom, Fe_atom, FeI_atom, MgII_atom, N_atom, Na_atom, S_atom, CaII_atom, He_9_atom
 import lightweaver as lw
-from MsLightweaverAtoms import H_6, CaII, H_6_nasa, CaII_nasa, H_6_nobb, H_6_noLybb, H_6_noLybbbf
+from MsLightweaverAtoms import H_6, H_6_prd, CaII, CaII_prd, H_6_nasa, CaII_nasa, H_6_nobb, H_6_noLybb, H_6_noLybbbf
 from pathlib import Path
 import os
 import os.path as path
@@ -16,13 +16,15 @@ from ReadAtmost import read_atmost
 # threadpool_limits(1)
 from RadynEmistab import EmisTable
 
-OutputDir = 'TimestepsAllNoNonThermHNoLybb/'
+OutputDir = 'TimestepsAllPrdBroadening10SubIterFineGrid/'
 Path(OutputDir).mkdir(parents=True, exist_ok=True)
 Path(OutputDir + '/Rfs').mkdir(parents=True, exist_ok=True)
 Path(OutputDir + '/ContFn').mkdir(parents=True, exist_ok=True)
 NasaAtoms = [H_6_nasa(), CaII_nasa(), He_9_atom(), C_atom(), O_atom(), Si_atom(), Fe_atom(),
              MgII_atom(), N_atom(), Na_atom(), S_atom()]
 FchromaAtoms = [H_6(), CaII(), He_9_atom(), C_atom(), O_atom(), Si_atom(), Fe_atom(),
+                MgII_atom(), N_atom(), Na_atom(), S_atom()]
+FchromaPrdAtoms = [H_6_prd(), CaII_prd(), He_9_atom(), C_atom(), O_atom(), Si_atom(), Fe_atom(),
                 MgII_atom(), N_atom(), Na_atom(), S_atom()]
 FchromaNoHbbAtoms = [H_6_nobb(), CaII(), He_9_atom(), C_atom(), O_atom(), Si_atom(), Fe_atom(),
                 MgII_atom(), N_atom(), Na_atom(), S_atom()]
@@ -31,20 +33,23 @@ FchromaNoLybbAtoms = [H_6_noLybb(), CaII(), He_9_atom(), C_atom(), O_atom(), Si_
 FchromaNoLybbbfAtoms = [H_6_noLybbbf(), CaII(), He_9_atom(), C_atom(), O_atom(), Si_atom(), Fe_atom(),
                 MgII_atom(), N_atom(), Na_atom(), S_atom()]
 FchromaNoHbbNoContAtoms = [H_6_nobb(), CaII(), He_9_atom()]
-AtomSet = FchromaNoLybbAtoms
 
-# Removing Fang rates
-del AtomSet[0].collisions[-1]
-lw.atomic_model.reconfigure_atom(AtomSet[0])
+AtomSet = FchromaPrdAtoms
 
-ConserveCharge = False
+DisableFangRates = False
+ConserveCharge = True
 PopulationTransportMode = 'Advect'
-Prd = False
-DetailedH = True
+Prd = True
+DetailedH = False
 DetailedHPath = 'TimestepsAllNoNonThermH/'
 # CoronalIrradiation = EmisTable('emistab.dat')
 CoronalIrradiation = None
 ActiveAtoms = ['H', 'Ca']
+
+if DisableFangRates:
+    # Removing Fang rates
+    del AtomSet[0].collisions[-1]
+    lw.atomic_model.reconfigure_atom(AtomSet[0])
 
 test_timesteps_in_dir(OutputDir)
 
