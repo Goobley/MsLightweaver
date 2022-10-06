@@ -1,40 +1,20 @@
 import pickle
 import numpy as np
-import matplotlib.pyplot as plt
-from lightweaver.rh_atoms import H_6_atom, C_atom, O_atom, OI_ord_atom, Si_atom, Al_atom, Fe_atom, FeI_atom, MgII_atom, N_atom, Na_atom, S_atom, CaII_atom
 from lightweaver.atmosphere import Atmosphere, ScaleType
 from lightweaver.atomic_table import DefaultAtomicAbundance
-from lightweaver.atomic_set import RadiativeSet, SpeciesStateTable
+from lightweaver.atomic_set import RadiativeSet
 from lightweaver.molecule import MolecularTable
-from lightweaver.LwCompiled import LwContext
-from lightweaver.utils import InitialSolution, planck, NgOptions, ConvergenceError, compute_radiative_losses, integrate_line_losses
+from lightweaver.utils import InitialSolution, ConvergenceError, compute_radiative_losses, integrate_line_losses
 import lightweaver.constants as Const
 import lightweaver as lw
-from typing import List
-from copy import deepcopy
-from MsLightweaverAtoms import H_6, CaII, H_6_nasa, CaII_nasa
-import os
-import os.path as path
-import time
 from radynpy.matsplotlib import OpcFile
 from radynpy.utils import hydrogen_absorption
 from numba import njit
-from pathlib import Path
-from scipy.linalg import solve
-from scipy.interpolate import interp1d, PchipInterpolator
-# from HydroWeno.Simulation import Grid
-# from HydroWeno.Advector import Advector
-# from HydroWeno.BCs import zero_grad_bc
-# from HydroWeno.Weno import reconstruct_weno_nm_z
-import warnings
-from traceback import print_stack
 from weno4 import weno4
 from RadynAdvection import an_sol, an_rad_sol, an_gml_sol
-import pdb
 
 def weno4_pos(xs, xp, fp, **kwargs):
-    return np.exp(weno4_safe(xs, xp, np.log(fp), **kwargs))
-
+    return np.exp(weno4(xs, xp, np.log(fp), **kwargs))
 
 # https://stackoverflow.com/a/21901260
 import subprocess
@@ -134,6 +114,7 @@ class MsLightweaverManager:
         self.prd = prd
         self.updateRhoPrd = False
         self.detailedH = detailedH
+        self.activeAtoms = activeAtoms
         # NOTE(cmo): If this is None and detailedH is True then the data from
         # atmost will be used, otherwise, an MsLw pickle will be loaded from
         # the path.
@@ -159,7 +140,7 @@ class MsLightweaverManager:
             self.spect = args['spect']
             self.aSet = self.spect.radSet
             self.eqPops = args['eqPops']
-            self.upperBc = atmos.upperBc
+            self.upperBc = self.atmos.upperBc
         else:
             nHTot = np.copy(self.nHTot[0])
             if self.downgoingRadiation:
@@ -189,7 +170,9 @@ class MsLightweaverManager:
             else:
                 self.eqPops = self.aSet.compute_eq_pops(self.atmos, self.mols)
 
-            self.ctx = lw.Context(self.atmos, self.spect, self.eqPops, initSol=InitialSolution.Lte, conserveCharge=self.conserveCharge, Nthreads=12)
+            nrHOnly = 'He' in activeAtoms
+            self.ctx = lw.Context(self.atmos, self.spect, self.eqPops, initSol=InitialSolution.Lte, 
+                                  conserveCharge=self.conserveCharge, Nthreads=12, nrHOnly=nrHOnly)
 
         self.atmos.bHeat = np.ones_like(self.atmost.bheat1[0]) * 1e-20
         self.atmos.hPops = self.eqPops['H']
@@ -248,20 +231,8 @@ class MsLightweaverManager:
         if self.prd:
             self.ctx.update_hprd_coeffs()
 
-        for i in range(NmaxIter):
-            dJ = self.ctx.formal_sol_gamma_matrices()
-            if i < Nscatter:
-                continue
-
-            delta = self.ctx.stat_equil()
-            if self.prd:
-                self.ctx.prd_redistribute()
-
-            if self.ctx.crswDone and dJ < JTol and delta < popTol:
-                print('Stat eq converged in %d iterations' % (i+1))
-                break
-        else:
-            raise ConvergenceError('Stat Eq did not converge.')
+        lw.iterate_ctx_se(self.ctx, prd=self.prd, Nscatter=Nscatter, NmaxIter=NmaxIter, 
+                          popsTol=popTol, JTol=JTol)
 
     def advect_pops(self):
         if self.rescalePops:
@@ -390,9 +361,8 @@ class MsLightweaverManager:
         s['Gamma'] = [np.copy(a.Gamma) if evalGamma else None for a in self.ctx.activeAtoms]
         return s
 
-    def time_dep_update(self, dt, prevState, theta=0.5):
+    def time_dep_update(self, dt, prevState, theta=1.0):
         atoms = self.ctx.activeAtoms
-        Nspace = self.atmos.Nspace
 
         maxDelta = 0.0
         for i, atom in enumerate(atoms):
@@ -405,34 +375,42 @@ class MsLightweaverManager:
 
         return maxDelta
 
-    def time_dep_step(self, nSubSteps=200, popsTol=1e-3, JTol=3e-3, theta=1.0, dt=None):
+    def time_dep_step(self, nSubSteps=200, popsTol=1e-3, JTol=3e-3, rhoTol=1e-2, dt=None):
         dt = dt if dt is not None else self.atmost.dt[self.idx+1]
         dNrPops = 0.0
-        underTol = False
         # self.ctx.spect.J[:] = 0.0
         if self.prd:
             for atom in self.ctx.activeAtoms:
                 for t in atom.trans:
                     t.recompute_gII()
 
-        prevState = self.time_dep_prev_state(evalGamma=(theta!=1.0))
+        prevState = None
+        prdStartedOnSub = 0
         for sub in range(nSubSteps):
             if self.updateRhoPrd and sub > 0:
-                dRho, prdIter = self.ctx.prd_redistribute(maxIter=10, tol=popsTol)
+                dPrd = self.ctx.prd_redistribute(maxIter=10, tol=popsTol)
+                print(dPrd.compact_representation())
 
             dJ = self.ctx.formal_sol_gamma_matrices()
-            delta = self.time_dep_update(dt, prevState, theta=theta)
+            print(dJ.compact_representation())
+            delta, prevState = self.ctx.time_dep_update(dt, prevState)
             if self.conserveCharge:
-                dNrPops = self.ctx.nr_post_update(timeDependentData={'dt': dt, 'nPrev': prevState['pops']})
+                hOnly = 'He' in self.activeAtoms
+                dNrPops = self.ctx.nr_post_update(timeDependentData={'dt': dt, 'nPrev': prevState}, 
+                                                  hOnly=hOnly)
 
-            if sub > 1 and ((delta < popsTol and dJ < JTol and dNrPops < popsTol)
-                            or (delta < 0.1*popsTol and dNrPops < 0.1*popsTol)):
+            popsChange = dNrPops if self.conserveCharge else delta
+            print(popsChange.compact_representation())
+
+            if sub > 1 and (popsChange.dPopsMax < popsTol and dJ.dJMax < JTol):
                 if self.prd: 
-                    if self.updateRhoPrd and dRho < JTol:
-                        break
+                    if self.updateRhoPrd:
+                        if dPrd.dRhoMax < rhoTol and sub - prdStartedOnSub > 1:
+                            break
                     else:
                         print('Starting PRD Iterations')
                         self.updateRhoPrd = True
+                        prdStartedOnSub = sub
                 else:
                     break
         else:

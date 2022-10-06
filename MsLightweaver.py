@@ -1,7 +1,9 @@
 import pickle
 import numpy as np
 import matplotlib.pyplot as plt
-from lightweaver.rh_atoms import H_6_atom, C_atom, O_atom, OI_ord_atom, Si_atom, Al_atom, Fe_atom, FeI_atom, MgII_atom, N_atom, Na_atom, S_atom, CaII_atom, He_9_atom
+from lightweaver.rh_atoms import (H_6_atom, C_atom, O_atom, OI_ord_atom, Si_atom, Al_atom, Fe_atom, 
+                                  FeI_atom, MgII_atom, N_atom, Na_atom, S_atom, CaII_atom, He_9_atom, 
+                                  He_large_atom, CaIII_45_atom)
 import lightweaver as lw
 from MsLightweaverAtoms import H_6, H_6_prd, CaII, CaII_prd, H_6_nasa, CaII_nasa, H_6_nobb, H_6_noLybb, H_6_noLybbbf
 from pathlib import Path
@@ -16,7 +18,14 @@ from ReadAtmost import read_atmost
 # threadpool_limits(1)
 from RadynEmistab import EmisTable
 
-OutputDir = 'MsTimesteps/'
+He_9_fine = He_9_atom()
+for l in He_9_fine.lines:
+    l.quadrature.Nlambda += 100
+    l.quadrature.qCore += 2.0
+    l.quadrature.qWing += 50
+lw.reconfigure_atom(He_9_fine)
+
+OutputDir = 'TimestepsHeLE_v08/'
 Path(OutputDir).mkdir(parents=True, exist_ok=True)
 Path(OutputDir + '/Rfs').mkdir(parents=True, exist_ok=True)
 Path(OutputDir + '/ContFn').mkdir(parents=True, exist_ok=True)
@@ -34,17 +43,17 @@ FchromaNoLybbbfAtoms = [H_6_noLybbbf(), CaII(), He_9_atom(), C_atom(), O_atom(),
                 MgII_atom(), N_atom(), Na_atom(), S_atom()]
 FchromaNoHbbNoContAtoms = [H_6_nobb(), CaII(), He_9_atom()]
 
-AtomSet = FchromaAtoms
+AtomSet = FchromaNoHbbAtoms
 
 DisableFangRates = False
-ConserveCharge = True
+ConserveCharge = False
 PopulationTransportMode = 'Advect'
 Prd = False
-DetailedH = False
-DetailedHPath = None
+DetailedH = True
+DetailedHPath = 'TimestepsAdvNrLosses/'
 # CoronalIrradiation = EmisTable('emistab.dat')
 CoronalIrradiation = None
-ActiveAtoms = ['H', 'Ca']
+ActiveAtoms = ['H', 'Ca', 'He']
 
 if DisableFangRates:
     # Removing Fang rates
@@ -66,26 +75,30 @@ if atmost.bheat1.shape[0] == 0:
 startingCtx = optional_load_starting_context(OutputDir)
 
 start = time.time()
-if ConserveCharge and 'He' in ActiveAtoms:
-    msFixedNe = MsLightweaverManager(atmost=atmost, outputDir=OutputDir,
+# if ConserveCharge and 'He' in ActiveAtoms:
+#     msFixedNe = MsLightweaverManager(atmost=atmost, outputDir=OutputDir,
+#                             atoms=AtomSet,
+#                             activeAtoms=ActiveAtoms, startingCtx=startingCtx,
+#                             detailedH=DetailedH,
+#                             detailedHPath=DetailedHPath,
+#                             conserveCharge=False,
+#                             populationTransportMode=PopulationTransportMode,
+#                             prd=Prd, downgoingRadiation=CoronalIrradiation)
+#     msFixedNe.initial_stat_eq(popTol=1e-3, Nscatter=20)
+try:
+    ms = MsLightweaverManager(atmost=atmost, outputDir=OutputDir,
                             atoms=AtomSet,
                             activeAtoms=ActiveAtoms, startingCtx=startingCtx,
                             detailedH=DetailedH,
                             detailedHPath=DetailedHPath,
-                            conserveCharge=False,
+                            conserveCharge=ConserveCharge,
                             populationTransportMode=PopulationTransportMode,
                             prd=Prd, downgoingRadiation=CoronalIrradiation)
-    msFixedNe.initial_stat_eq(popTol=1e-3, Nscatter=20)
-ms = MsLightweaverManager(atmost=atmost, outputDir=OutputDir,
-                          atoms=AtomSet,
-                          activeAtoms=ActiveAtoms, startingCtx=startingCtx,
-                          detailedH=DetailedH,
-                          detailedHPath=DetailedHPath,
-                          conserveCharge=ConserveCharge,
-                          populationTransportMode=PopulationTransportMode,
-                          prd=Prd, downgoingRadiation=CoronalIrradiation)
-if ConserveCharge and 'He' in ActiveAtoms:
-    ms.ctx.eqPops['He'][...] = msFixedNe.ctx.eqPops['He']
+except ValueError:
+    import pdb
+    pdb.post_mortem()
+# if ConserveCharge and 'He' in ActiveAtoms:
+#     ms.ctx.eqPops['He'][...] = msFixedNe.ctx.eqPops['He']
 ms.initial_stat_eq(popTol=1e-3, Nscatter=20)
 ms.save_timestep()
 
@@ -104,7 +117,7 @@ for i in range(firstStep, maxSteps):
     stepStart = time.time()
     if i != 0:
         ms.increment_step()
-    ms.time_dep_step(popsTol=1e-3, JTol=5e-3, nSubSteps=1000, theta=1.0)
+    ms.time_dep_step(popsTol=1e-3, JTol=5e-3, rhoTol=1e-2, nSubSteps=1000)
     ms.ctx.clear_ng()
     ms.save_timestep()
     stepEnd = time.time()

@@ -482,7 +482,7 @@ def H_6_prd():
         AtomicLevel(E=109754.578000, g=1.000000, label="H II continuum", stage=1, J=None, L=None, S=None),
     ],
     lines=[
-        VoigtLine(j=1, i=0, f=4.167000e-01, type=LineType.PRD, quadrature=LinearCoreExpWings(Nlambda=501, qCore=100.000000, qWing=600.000), broadening=LineBroadening(natural=[RadiativeBroadening(gamma=4.702e8)], elastic=[VdwRadyn(vals=[1.0]), HydrogenLinearStarkBroadening()])),
+        VoigtLine(j=1, i=0, f=4.167000e-01, type=LineType.PRD, quadrature=LinearCoreExpWings(Nlambda=201, qCore=100.000000, qWing=600.000), broadening=LineBroadening(natural=[RadiativeBroadening(gamma=4.702e8)], elastic=[VdwRadyn(vals=[1.0]), HydrogenLinearStarkBroadening()])),
         VoigtLine(j=2, i=0, f=7.919000e-02, type=LineType.PRD, quadrature=LinearCoreExpWings(Nlambda=80, qCore=40.000000, qWing=250.000), broadening=LineBroadening(natural=[RadiativeBroadening(gamma=9.991e7)], elastic=[VdwRadyn(vals=[1.0]), HydrogenLinearStarkBroadening()])),
         VoigtLine(j=3, i=0, f=2.901000e-02, type=LineType.CRD, quadrature=LinearCoreExpWings(Nlambda=50, qCore=10.000000, qWing=100.0000), broadening=LineBroadening(natural=[RadiativeBroadening(gamma=3.021e7)], elastic=[VdwRadyn(vals=[1.0]), HydrogenLinearStarkBroadening()])),
         VoigtLine(j=4, i=0, f=1.395000e-02, type=LineType.CRD, quadrature=LinearCoreExpWings(Nlambda=50, qCore=10.000000, qWing=100.0000), broadening=LineBroadening(natural=[RadiativeBroadening(gamma=1.156e7)], elastic=[VdwRadyn(vals=[1.0]), HydrogenLinearStarkBroadening()])),
