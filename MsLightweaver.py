@@ -15,8 +15,9 @@ from ReadAtmost import read_atmost
 # from threadpoolctl import threadpool_limits
 # threadpool_limits(1)
 from RadynEmistab import EmisTable
+from Si30_gkerr_update import Si_30_gkerr_update as Si_30
 
-OutputDir = 'MsTimesteps/'
+OutputDir = 'Timesteps_HSi/'
 Path(OutputDir).mkdir(parents=True, exist_ok=True)
 Path(OutputDir + '/Rfs').mkdir(parents=True, exist_ok=True)
 Path(OutputDir + '/ContFn').mkdir(parents=True, exist_ok=True)
@@ -33,18 +34,21 @@ FchromaNoLybbAtoms = [H_6_noLybb(), CaII(), He_9_atom(), C_atom(), O_atom(), Si_
 FchromaNoLybbbfAtoms = [H_6_noLybbbf(), CaII(), He_9_atom(), C_atom(), O_atom(), Si_atom(), Fe_atom(),
                 MgII_atom(), N_atom(), Na_atom(), S_atom()]
 FchromaNoHbbNoContAtoms = [H_6_nobb(), CaII(), He_9_atom()]
+FchromaSiAtoms = [H_6(), CaII(), He_9_atom(), C_atom(), O_atom(), Si_30(), Fe_atom(),
+                  MgII_atom(), N_atom(), Na_atom(), S_atom()]
 
-AtomSet = FchromaAtoms
+AtomSet = FchromaSiAtoms
 
 DisableFangRates = False
 ConserveCharge = True
+ConserveChargeHOnly = True
 PopulationTransportMode = 'Advect'
 Prd = False
 DetailedH = False
 DetailedHPath = None
 # CoronalIrradiation = EmisTable('emistab.dat')
 CoronalIrradiation = None
-ActiveAtoms = ['H', 'Ca']
+ActiveAtoms = ['H', 'Si']
 
 if DisableFangRates:
     # Removing Fang rates
@@ -66,26 +70,15 @@ if atmost.bheat1.shape[0] == 0:
 startingCtx = optional_load_starting_context(OutputDir)
 
 start = time.time()
-if ConserveCharge and 'He' in ActiveAtoms:
-    msFixedNe = MsLightweaverManager(atmost=atmost, outputDir=OutputDir,
-                            atoms=AtomSet,
-                            activeAtoms=ActiveAtoms, startingCtx=startingCtx,
-                            detailedH=DetailedH,
-                            detailedHPath=DetailedHPath,
-                            conserveCharge=False,
-                            populationTransportMode=PopulationTransportMode,
-                            prd=Prd, downgoingRadiation=CoronalIrradiation)
-    msFixedNe.initial_stat_eq(popTol=1e-3, Nscatter=20)
 ms = MsLightweaverManager(atmost=atmost, outputDir=OutputDir,
                           atoms=AtomSet,
                           activeAtoms=ActiveAtoms, startingCtx=startingCtx,
                           detailedH=DetailedH,
                           detailedHPath=DetailedHPath,
                           conserveCharge=ConserveCharge,
+                          conserveChargeHOnly=ConserveChargeHOnly,
                           populationTransportMode=PopulationTransportMode,
                           prd=Prd, downgoingRadiation=CoronalIrradiation)
-if ConserveCharge and 'He' in ActiveAtoms:
-    ms.ctx.eqPops['He'][...] = msFixedNe.ctx.eqPops['He']
 ms.initial_stat_eq(popTol=1e-3, Nscatter=20)
 ms.save_timestep()
 

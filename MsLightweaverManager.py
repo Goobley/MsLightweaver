@@ -121,6 +121,7 @@ class MsLightweaverManager:
                  detailedH=False,
                  detailedHPath=None,
                  startingCtx=None, conserveCharge=False,
+                 conserveChargeHOnly=False,
                  populationTransportMode='Advect',
                  downgoingRadiation=None,
                  prd=False):
@@ -128,6 +129,7 @@ class MsLightweaverManager:
         self.atmost = atmost
         self.outputDir = outputDir
         self.conserveCharge = conserveCharge
+        self.conserveChargeHOnly = conserveChargeHOnly
         self.abund = DefaultAtomicAbundance
         self.idx = 0
         self.nHTot = atmost.d1 / (self.abund.massPerH * Const.Amu)
@@ -159,7 +161,7 @@ class MsLightweaverManager:
             self.spect = args['spect']
             self.aSet = self.spect.radSet
             self.eqPops = args['eqPops']
-            self.upperBc = atmos.upperBc
+            self.upperBc = self.atmos.upperBc
         else:
             nHTot = np.copy(self.nHTot[0])
             if self.downgoingRadiation:
@@ -189,7 +191,7 @@ class MsLightweaverManager:
             else:
                 self.eqPops = self.aSet.compute_eq_pops(self.atmos, self.mols)
 
-            self.ctx = lw.Context(self.atmos, self.spect, self.eqPops, initSol=InitialSolution.Lte, conserveCharge=self.conserveCharge, Nthreads=12)
+            self.ctx = lw.Context(self.atmos, self.spect, self.eqPops, initSol=InitialSolution.Lte, conserveCharge=self.conserveCharge, nrHOnly=self.conserveChargeHOnly, Nthreads=12)
 
         self.atmos.bHeat = np.ones_like(self.atmost.bheat1[0]) * 1e-20
         self.atmos.hPops = self.eqPops['H']
@@ -199,6 +201,7 @@ class MsLightweaverManager:
 
         if self.downgoingRadiation:
             self.upperBc.set_bc(self.downgoingRadiation.compute_downgoing_radiation(self.spect.wavelength, self.atmos))
+        # NOTE(cmo): For saving the losses
         self.ctx.depthData.fill = True
         # self.opac_background()
 
@@ -248,19 +251,8 @@ class MsLightweaverManager:
         if self.prd:
             self.ctx.update_hprd_coeffs()
 
-        for i in range(NmaxIter):
-            dJ = self.ctx.formal_sol_gamma_matrices()
-            if i < Nscatter:
-                continue
-
-            delta = self.ctx.stat_equil()
-            if self.prd:
-                self.ctx.prd_redistribute()
-
-            if self.ctx.crswDone and dJ < JTol and delta < popTol:
-                print('Stat eq converged in %d iterations' % (i+1))
-                break
-        else:
+        it = lw.iterate_ctx_se(self.ctx, Nscatter=Nscatter, popsTol=popTol, JTol=JTol, NmaxIter=NmaxIter)
+        if it == NmaxIter:
             raise ConvergenceError('Stat Eq did not converge.')
 
     def advect_pops(self):
@@ -420,10 +412,11 @@ class MsLightweaverManager:
             if self.updateRhoPrd and sub > 0:
                 dRho, prdIter = self.ctx.prd_redistribute(maxIter=10, tol=popsTol)
 
-            dJ = self.ctx.formal_sol_gamma_matrices()
+            dJ = self.ctx.formal_sol_gamma_matrices().dJMax
+            print('dJ = %.2e' % dJ)
             delta = self.time_dep_update(dt, prevState, theta=theta)
             if self.conserveCharge:
-                dNrPops = self.ctx.nr_post_update(timeDependentData={'dt': dt, 'nPrev': prevState['pops']})
+                dNrPops = self.ctx.nr_post_update(timeDependentData={'dt': dt, 'nPrev': prevState['pops']}, hOnly=self.conserveChargeHOnly).dPopsMax
 
             if sub > 1 and ((delta < popsTol and dJ < JTol and dNrPops < popsTol)
                             or (delta < 0.1*popsTol and dNrPops < 0.1*popsTol)):
@@ -444,7 +437,7 @@ class MsLightweaverManager:
         self.ctx.depthData.fill = True
         dJ = 1.0
         while dJ > 1e-5:
-            dJ = self.ctx.formal_sol_gamma_matrices()
+            dJ = self.ctx.formal_sol_gamma_matrices().dJMax
         self.ctx.depthData.fill = False
         J = np.copy(self.ctx.spect.J)
 
@@ -470,7 +463,7 @@ class MsLightweaverManager:
         if Jstart is None:
             dJ = 1.0
             while dJ > 1e-3:
-                dJ = self.ctx.formal_sol_gamma_matrices()
+                dJ = self.ctx.formal_sol_gamma_matrices().dJMax
             Jstart = np.copy(self.ctx.spect.J)
                 
         self.atmos.temperature[k] += 0.5 * pertSize
@@ -511,7 +504,7 @@ class MsLightweaverManager:
         if Jstart is None:
             dJ = 1.0
             while dJ > 1e-3:
-                dJ = self.ctx.formal_sol_gamma_matrices()
+                dJ = self.ctx.formal_sol_gamma_matrices().dJMax
             Jstart = np.copy(self.ctx.spect.J)
                 
         self.atmos.temperature[k] += 0.5 * pertSize
@@ -564,7 +557,7 @@ class MsLightweaverManager:
         if Jstart is None:
             dJ = 1.0
             while dJ > 1e-3:
-                dJ = self.ctx.formal_sol_gamma_matrices()
+                dJ = self.ctx.formal_sol_gamma_matrices().dJMax
             Jstart = np.copy(self.ctx.spect.J)
                 
         self.atmos.ne[k] += 0.5 * pertSizePercent * self.atmos.ne[k]
@@ -605,7 +598,7 @@ class MsLightweaverManager:
         if Jstart is None:
             dJ = 1.0
             while dJ > 1e-3:
-                dJ = self.ctx.formal_sol_gamma_matrices()
+                dJ = self.ctx.formal_sol_gamma_matrices().dJMax
             Jstart = np.copy(self.ctx.spect.J)
                 
         self.atmos.vlos[k] += 0.5 * pertSize
