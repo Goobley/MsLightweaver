@@ -11,7 +11,7 @@ import time
 # from notify_run import Notify
 from MsLightweaverManager import MsLightweaverManager
 from MsLightweaverUtil import test_timesteps_in_dir, optional_load_starting_context
-from ReadAtmost import read_atmost
+from ReadAtmost import read_atmost, read_atmost_cdf
 # from threadpoolctl import threadpool_limits
 # threadpool_limits(1)
 from RadynEmistab import EmisTable
@@ -57,9 +57,18 @@ if DisableFangRates:
 
 test_timesteps_in_dir(OutputDir)
 
-atmost = read_atmost('atmost.dat')
+atmost = read_atmost_cdf('atmost.cdf')
 atmost.to_SI()
-if atmost.bheat1.shape[0] == 0:
+atmost = atmost.reinterpolate(maxTimestep=0.05)
+
+if atmost.bheat1 is None:
+    try:
+        with open('bheat_interp.pickle', 'rb') as pkl:
+            atmost.bheat1 = pickle.load(pkl)
+    except:
+        print('No bheat_interp pickle found.')
+
+if atmost.bheat1 is None or atmost.bheat1.shape[0] == 0:
     try:
         atmost.bheat1 = np.load('BheatInterp.npy')
     except:
