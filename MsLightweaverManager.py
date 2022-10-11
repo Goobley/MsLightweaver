@@ -251,7 +251,7 @@ class MsLightweaverManager:
         if self.prd:
             self.ctx.update_hprd_coeffs()
 
-        it = lw.iterate_ctx_se(self.ctx, Nscatter=Nscatter, popsTol=popTol, JTol=JTol, NmaxIter=NmaxIter)
+        it = lw.iterate_ctx_se(self.ctx, Nscatter=Nscatter, popsTol=popTol, JTol=JTol, NmaxIter=NmaxIter, prd=self.prd)
         if it == NmaxIter:
             raise ConvergenceError('Stat Eq did not converge.')
 
@@ -285,9 +285,9 @@ class MsLightweaverManager:
         return pops
 
     def detailed_ne(self):
-        if not self.detailedH:
-            raise ValueError('Detailed ne called without detailedH==True')
         if self.detailedHPath:
+            if not self.detailedH:
+                raise ValueError('Detailed ne called without detailedH==True')
             with open(self.detailedHPath + '/Step_%.6d.pickle' % self.idx, 'rb') as pkl:
                 step = pickle.load(pkl)
             ne = step['ne']
@@ -407,21 +407,32 @@ class MsLightweaverManager:
                 for t in atom.trans:
                     t.recompute_gII()
 
-        prevState = self.time_dep_prev_state(evalGamma=(theta!=1.0))
+        # prevState = self.time_dep_prev_state(evalGamma=(theta!=1.0))
+        prevState = None
         for sub in range(nSubSteps):
             if self.updateRhoPrd and sub > 0:
-                dRho, prdIter = self.ctx.prd_redistribute(maxIter=10, tol=popsTol)
+                dPrd = self.ctx.prd_redistribute(maxIter=10, tol=popsTol)
+                print(dPrd.compact_representation())
 
-            dJ = self.ctx.formal_sol_gamma_matrices().dJMax
-            print('dJ = %.2e' % dJ)
-            delta = self.time_dep_update(dt, prevState, theta=theta)
+            dJ = self.ctx.formal_sol_gamma_matrices()
+            print(dJ.compact_representation())
+            # if dJ.dJMax > 5e-1:
+            #     continue
+            # delta = self.time_dep_update(dt, prevState, theta=theta)
+            delta, prevState = self.ctx.time_dep_update(dt, prevState)
+            if delta.dPopsMax > 5e-1 and dJ.dJMax > 1e-2:
+                print(delta.compact_representation())
+                continue
+
             if self.conserveCharge:
-                dNrPops = self.ctx.nr_post_update(timeDependentData={'dt': dt, 'nPrev': prevState['pops']}, hOnly=self.conserveChargeHOnly).dPopsMax
+                dNrPops = self.ctx.nr_post_update(timeDependentData={'dt': dt, 'nPrev': prevState}, hOnly=self.conserveChargeHOnly)
+            popsChange = dNrPops if self.conserveCharge else delta
+            print(popsChange.compact_representation())
 
-            if sub > 1 and ((delta < popsTol and dJ < JTol and dNrPops < popsTol)
-                            or (delta < 0.1*popsTol and dNrPops < 0.1*popsTol)):
+            if sub > 1 and ((popsChange.dPopsMax < popsTol and dJ.dJMax < JTol)
+                            or (popsChange.dPopsMax < 0.1*popsTol)):
                 if self.prd: 
-                    if self.updateRhoPrd and dRho < JTol:
+                    if self.updateRhoPrd  and dPrd.dRhoMax < popsTol:
                         break
                     else:
                         print('Starting PRD Iterations')

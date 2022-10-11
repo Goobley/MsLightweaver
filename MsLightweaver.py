@@ -17,7 +17,7 @@ from ReadAtmost import read_atmost, read_atmost_cdf
 from RadynEmistab import EmisTable
 from Si30_gkerr_update import Si_30_gkerr_update as Si_30
 
-OutputDir = 'Timesteps_HSi/'
+OutputDir = 'Timesteps_HSiNoConsPrd/'
 Path(OutputDir).mkdir(parents=True, exist_ok=True)
 Path(OutputDir + '/Rfs').mkdir(parents=True, exist_ok=True)
 Path(OutputDir + '/ContFn').mkdir(parents=True, exist_ok=True)
@@ -36,14 +36,18 @@ FchromaNoLybbbfAtoms = [H_6_noLybbbf(), CaII(), He_9_atom(), C_atom(), O_atom(),
 FchromaNoHbbNoContAtoms = [H_6_nobb(), CaII(), He_9_atom()]
 FchromaSiAtoms = [H_6(), CaII(), He_9_atom(), C_atom(), O_atom(), Si_30(), Fe_atom(),
                   MgII_atom(), N_atom(), Na_atom(), S_atom()]
+NasaSiAtoms = [H_6_nasa(), CaII_nasa(), He_9_atom(), C_atom(), O_atom(), Si_30(), Fe_atom(),
+                  MgII_atom(), N_atom(), Na_atom(), S_atom()]
+FchromaPrdSiAtoms = [H_6_prd(), CaII_prd(), He_9_atom(), C_atom(), O_atom(), Si_30(), Fe_atom(),
+                  MgII_atom(), N_atom(), Na_atom(), S_atom()]
 
-AtomSet = FchromaSiAtoms
+AtomSet = FchromaPrdSiAtoms
 
 DisableFangRates = False
-ConserveCharge = True
-ConserveChargeHOnly = True
+ConserveCharge = False
+ConserveChargeHOnly = False
 PopulationTransportMode = 'Advect'
-Prd = False
+Prd = True
 DetailedH = False
 DetailedHPath = None
 # CoronalIrradiation = EmisTable('emistab.dat')
@@ -59,7 +63,7 @@ test_timesteps_in_dir(OutputDir)
 
 atmost = read_atmost_cdf('atmost.cdf')
 atmost.to_SI()
-atmost = atmost.reinterpolate(maxTimestep=0.05)
+# atmost = atmost.reinterpolate(maxTimestep=0.05)
 
 if atmost.bheat1 is None:
     try:
@@ -107,7 +111,7 @@ for i in range(firstStep, maxSteps):
     if i != 0:
         ms.increment_step()
     ms.time_dep_step(popsTol=1e-3, JTol=5e-3, nSubSteps=1000, theta=1.0)
-    ms.ctx.clear_ng()
+    # ms.ctx.clear_ng()
     ms.save_timestep()
     stepEnd = time.time()
     print('-------')
