@@ -43,12 +43,18 @@ class VdwRadyn(VdwApprox):
         nHGround = eqPops['H'][0, :]
         return self.cross * atmos.temperature**0.3 * nHGround
 
+
+def atomic_position(Z):
+    row_ends_Z = [0, 2, 10, 18, 36, 54, 86]
+    for i in range(len(row_ends_Z)-1):
+        if Z > row_ends_Z[i] and Z <= row_ends_Z[i+1]:
+            break
+    col = Z - row_ends_Z[i]
+    row = i+1
+    return row, col
+
 @dataclass
 class Shull82(CollisionalRates):
-    row: int
-    col: int
-    #  = 3, 1 for the Ca rates in Radyn
-    #  Not used anymore as we pulled the Radyn formulation rather than the RH one
     aCol: float
     tCol: float
     aRad: float
@@ -57,6 +63,12 @@ class Shull82(CollisionalRates):
     bDi: float
     t0: float
     t1: float
+    summers_scaling: float = 1.0
+
+    """Coefficients for collisional ionization, radiative recombination, and
+    dielectronic recombination following Shull & van Steenberg (1982, ApJS, 48,
+    95). From RH Implementation.
+    """
 
     def setup(self, atom):
         i, j = self.i, self.j
@@ -67,7 +79,7 @@ class Shull82(CollisionalRates):
         self.jLevel = atom.levels[self.j]
 
     def __repr__(self):
-        s = 'Shull82(j=%d, i=%d, row=%d, col=%d, aCol=%e, tCol=%e, aRad=%e, xRad=%e, aDi=%e, bDi=%e, t0=%e, t1=%e)' % (self.j, self.i, self.row, self.col, self.aCol, self.tCol, self.aRad, self.xRad, self.aDi, self.bDi, self.t0, self.t1)
+        s = f'{type(self).__name__}(j={self.j}, i={self.i}, aCol={self.aCol:e}, tCol={self.tCol:e}, aRad={self.aRad:e}, xRad={self.xRad:e}, aDi={self.aDi:e}, bDi={self.bDi:e}, t0={self.t0:e}, t1={self.t1:e}, summers_scaling={self.summers_scaling:e})'
         return s
 
     def compute_rates(self, atmos, eqPops, Cmat):
@@ -75,23 +87,24 @@ class Shull82(CollisionalRates):
         # NOTE(cmo): Summers direct recombination rates
         zz = self.jLevel.stage
         iso_seq = self.atom.element.Z - self.iLevel.stage
+        row, col = atomic_position(iso_seq)
 
         rhoq = (atmos.ne * lw.CM_TO_M**3) / zz**7
-        # x = (0.5 * zz + (self.col - 1)) * self.row / 3
-        # beta = -0.2 / np.log(x + np.e)
+        x = (0.5 * zz + (col - 1)) * row / 3
+        beta = -0.2 / np.log(x + np.e)
 
         tg = atmos.temperature
         # NOTE(cmo): This is the RH formulation
-        # rho0 = 30.0 + 50.0*x
-        # y = (1.0 + rhoq/rho0)**beta
-        # summersScaling = 1.0
-        # summers = summersScaling * y + (1.0 - summersScaling)
-        rho0 = 2000.0
-        if (iso_seq == lw.PeriodicTable['Li'].Z 
-            or iso_seq == lw.PeriodicTable['Na'].Z 
-            or iso_seq == lw.PeriodicTable['K'].Z):
-            rho0 = 30.0
-        summers = 1.0 / (1.0 + rhoq / rho0)**0.14
+        rho0 = 30.0 + 50.0*x
+        y = (1.0 + rhoq/rho0)**beta
+        summers = self.summers_scaling * y + (1.0 - self.summers_scaling)
+        # NOTE(cmo): This is the RADYN formulation
+        # rho0 = 2000.0
+        # if (iso_seq == lw.PeriodicTable['Li'].Z
+        #     or iso_seq == lw.PeriodicTable['Na'].Z
+        #     or iso_seq == lw.PeriodicTable['K'].Z):
+        #     rho0 = 30.0
+        # summers = 1.0 / (1.0 + rhoq / rho0)**0.14
 
 
         cDown = self.aRad * (tg * 1e-4)**(-self.xRad)
@@ -111,154 +124,9 @@ class Shull82(CollisionalRates):
 
 
 @dataclass
-class Ar85Ch(CollisionalRates):
-    t1: float
-    t2: float
-    a: float
-    b: float
-    c: float
-    d: float
-
-    # AR85-CHH in RH
-
-    def setup(self, atom):
-        i, j = self.i, self.j
-        self.i = min(i, j)
-        self.j = max(i, j)
-        self.atom = atom
-        self.iLevel = atom.levels[self.i]
-        self.jLevel = atom.levels[self.j]
-
-    def __repr__(self):
-        s = f'Ar85Ch(j={self.j}, i={self.i}, t1={self.t1}, t2={self.t2}, a={self.a}, b={self.b}, c={self.c}, d={self.d})' 
-        return s
-
-    def compute_rates(self, atmos, eqPops, Cmat):
-        mask = (atmos.temperature >= self.t1) & (atmos.temperature <= self.t2)
-        t4 = atmos.temperature * 1e-4
-        cDown = self.a * 1e-9 * t4**self.b * (1.0 + self.c*np.exp(self.d * t4)) * eqPops['H'][0] * lw.CM_TO_M**3
-
-        Cmat[self.i, self.j, mask] += cDown[mask]
-
-@dataclass
-class Ar85Chp(CollisionalRates):
-    t1: float
-    t2: float
-    a: float
-    b: float
-    c: float
-    d: float
-
-    # AR85-CH+ in Radyn
-
-    def setup(self, atom):
-        i, j = self.i, self.j
-        self.i = min(i, j)
-        self.j = max(i, j)
-        self.atom = atom
-        self.iLevel = atom.levels[self.i]
-        self.jLevel = atom.levels[self.j]
-
-    def __repr__(self):
-        s = f'Ar85Ch(j={self.j}, i={self.i}, t1={self.t1}, t2={self.t2}, a={self.a}, b={self.b}, c={self.c}, d={self.d})' 
-        return s
-
-    def compute_rates(self, atmos, eqPops, Cmat):
-        mask = (atmos.temperature >= self.t1) & (atmos.temperature <= self.t2)
-        t4 = atmos.temperature * 1e-4
-        cUp = self.a * 1e-9 * t4**self.b * np.exp(-self.c * t4) * np.exp(-self.d * lw.EV / lw.KBoltzmann / atmos.temperature) * eqPops['H'][-1] * lw.CM_TO_M**3
-
-        Cmat[self.j, self.i, mask] += cUp[mask]
-
-
-def hepop(t, toth):
-    # Ratio of helium ionisation fractions, from AR85.
-    temperature = np.array([3.50, 4.00, 4.10, 4.20, 4.30, 4.40, 4.50, 4.60, 
-                   4.70, 4.80, 4.90, 5.00, 5.10, 5.20, 5.30, 5.40, 
-                   5.50, 5.60, 5.70])
-    one = np.array([0.0, 0.0 ,0.0 ,0.0 ,0.0 ,-0.07,-0.51,-1.33,-2.07, 
-                    -2.63,-3.20,-3.94,-4.67,-5.32,-5.90,-6.42,-6.90,-7.33,-7.73])
-    two = np.array([-20.0,-9.05,-6.10,-3.75,-2.12,-0.84,-0.16, 
-                    -0.02,-0.01,-0.05,-0.34,-0.96,-1.60,-2.16,-2.63,-3.03,-3.38,-3.68,-3.94])
-    abhe=0.1
-    tlog=np.log10(t)
-    f1=10.**(weno4(tlog,temperature,one))
-    f2=10.**(weno4(tlog,temperature,two))
-    he1=toth*abhe*f1
-    he2=toth*abhe*f2
-    alfa=1.-f1-f2
-    alfa[alfa < 0.0]=1.e-30
-    alfa=toth*abhe*alfa
-    return he1, he2, alfa
-
-@dataclass
-class Ar85Che(CollisionalRates):
-    t1: float
-    t2: float
-    a: float
-    b: float
-    c: float
-    d: float
-
-    # AR85-CHE in Radyn. There's a bit of a mixup over whether these are up or down rates. But the paper is clear that the non-p (i.e. with non-ionised H/He) is recombination.
-
-    def setup(self, atom):
-        i, j = self.i, self.j
-        self.i = min(i, j)
-        self.j = max(i, j)
-        self.atom = atom
-        self.iLevel = atom.levels[self.i]
-        self.jLevel = atom.levels[self.j]
-
-    def __repr__(self):
-        s = f'Ar85Ch(j={self.j}, i={self.i}, t1={self.t1}, t2={self.t2}, a={self.a}, b={self.b}, c={self.c}, d={self.d})' 
-        return s
-
-    def compute_rates(self, atmos, eqPops, Cmat):
-        mask = (atmos.temperature >= self.t1) & (atmos.temperature <= self.t2)
-        t4 = atmos.temperature * 1e-4
-        toth = atmos.nHTot
-        he1, _, _ = hepop(atmos.temperature, toth)
-        cDown = self.a * 1e-9 * t4**self.b * (1.0 + self.c*np.exp(self.d * t4)) * he1 * lw.CM_TO_M**3
-
-        Cmat[self.i, self.j, mask] += cDown[mask]
-
-@dataclass
-class Ar85Chep(CollisionalRates):
-    t1: float
-    t2: float
-    a: float
-    b: float
-    c: float
-    d: float
-
-    # AR85-CHE+/CHP in Radyn. There's a bit of a mixup over whether these are up or down rates. But the paper is clear that the non-p (i.e. with non-ionised H/He) is recombination.
-
-    def setup(self, atom):
-        i, j = self.i, self.j
-        self.i = min(i, j)
-        self.j = max(i, j)
-        self.atom = atom
-        self.iLevel = atom.levels[self.i]
-        self.jLevel = atom.levels[self.j]
-
-    def __repr__(self):
-        s = f'Ar85Ch(j={self.j}, i={self.i}, t1={self.t1}, t2={self.t2}, a={self.a}, b={self.b}, c={self.c}, d={self.d})' 
-        return s
-
-    def compute_rates(self, atmos, eqPops, Cmat):
-        mask = (atmos.temperature >= self.t1) & (atmos.temperature <= self.t2)
-        t4 = atmos.temperature * 1e-4
-        toth = atmos.nHTot
-        he1, he2, _ = hepop(atmos.temperature, toth)
-
-        cUp = self.a * 1e-9 * t4**self.b * np.exp(-self.c * t4) * np.exp(-self.d * lw.EV / lw.KBoltzmann / atmos.temperature) * he2 * lw.CM_TO_M**3
-
-        Cmat[self.j, self.i, mask] += cUp[mask]
-
-@dataclass
 class Ar85Cea(CollisionalRates):
     fudge: float = 1.0
+    """Arnaud & Rothenflug 1985 collisional autoionisation (1985, ApJS 60)"""
 
     def setup(self, atom):
         i, j = self.i, self.j
@@ -269,7 +137,7 @@ class Ar85Cea(CollisionalRates):
         self.jLevel = atom.levels[self.j]
 
     def __repr__(self):
-        s = 'Ar85Cea(j=%d, i=%d, fudge=%e)' % (self.j, self.i, self.fudge)
+        s = f'{type(self).__name__}(j={self.j}, i={self.i}, fudge={self.fudge:e})'
         return s
 
     def compute_rates(self, atmos, eqPops, Cmat):
@@ -277,7 +145,7 @@ class Ar85Cea(CollisionalRates):
         isoseq = zz - self.iLevel.stage
         kBT = lw.KBoltzmann * atmos.temperature / lw.EV
         cup = 0.0
-        
+
         if isoseq == lw.PeriodicTable['Li'].Z:
             iea = 13.6 * (zz - 0.835)**2 - 0.25 * (zz - 1.62)**2
             b = 1.0 / (1.0 + 2e-4 * zz**3)
@@ -348,7 +216,7 @@ class Ar85Cea(CollisionalRates):
             a = 5.0e-17
             b = 1.12
             cup = 6.69e7 * a * iea / np.sqrt(kBT) * np.exp(-y)*(1.0 + b*f1y)
-            
+
 
         # NOTE(cmo): From old CaII version
         # a = 6.0e-17 # NOTE(cmo): From looking at the AR85 paper, (page 430), should this instead be 9.8e-17 (Ca+)
@@ -364,6 +232,153 @@ class Ar85Cea(CollisionalRates):
         # NOTE(cmo): Rates are in cm-3 s-1, so use ne in cm-3
         cup *= self.fudge * atmos.ne * lw.CM_TO_M**3
         Cmat[self.j, self.i, :] += cup
+
+
+@dataclass
+class Ar85Ch(CollisionalRates):
+    t1: float
+    t2: float
+    a: float
+    b: float
+    c: float
+    d: float
+
+    # AR85-CHH in RH
+
+    def setup(self, atom):
+        i, j = self.i, self.j
+        self.i = min(i, j)
+        self.j = max(i, j)
+        self.atom = atom
+        self.iLevel = atom.levels[self.i]
+        self.jLevel = atom.levels[self.j]
+
+    def __repr__(self):
+        s = f'{type(self).__name__}(j={self.j}, i={self.i}, t1={self.t1}, t2={self.t2}, a={self.a}, b={self.b}, c={self.c}, d={self.d})' 
+        return s
+
+    def compute_rates(self, atmos, eqPops, Cmat):
+        mask = (atmos.temperature >= self.t1) & (atmos.temperature <= self.t2)
+        t4 = atmos.temperature * 1e-4
+        cDown = self.a * 1e-9 * t4**self.b * (1.0 + self.c*np.exp(self.d * t4)) * eqPops['H'][0] * lw.CM_TO_M**3
+
+        Cmat[self.i, self.j, mask] += cDown[mask]
+
+@dataclass
+class Ar85Chp(CollisionalRates):
+    t1: float
+    t2: float
+    a: float
+    b: float
+    c: float
+    d: float
+
+    # AR85-CH+ in Radyn
+
+    def setup(self, atom):
+        i, j = self.i, self.j
+        self.i = min(i, j)
+        self.j = max(i, j)
+        self.atom = atom
+        self.iLevel = atom.levels[self.i]
+        self.jLevel = atom.levels[self.j]
+
+    def __repr__(self):
+        s = f'{type(self).__name__}(j={self.j}, i={self.i}, t1={self.t1}, t2={self.t2}, a={self.a}, b={self.b}, c={self.c}, d={self.d})' 
+        return s
+
+    def compute_rates(self, atmos, eqPops, Cmat):
+        mask = (atmos.temperature >= self.t1) & (atmos.temperature <= self.t2)
+        t4 = atmos.temperature * 1e-4
+        cUp = self.a * 1e-9 * t4**self.b * np.exp(-self.c * t4) * np.exp(-self.d * lw.EV / lw.KBoltzmann / atmos.temperature) * eqPops['H'][-1] * lw.CM_TO_M**3
+
+        Cmat[self.j, self.i, mask] += cUp[mask]
+
+
+def hepop(t, toth):
+    # Ratio of helium ionisation fractions, from AR85.
+    temperature = np.array([3.50, 4.00, 4.10, 4.20, 4.30, 4.40, 4.50, 4.60, 
+                   4.70, 4.80, 4.90, 5.00, 5.10, 5.20, 5.30, 5.40, 
+                   5.50, 5.60, 5.70])
+    one = np.array([0.0, 0.0 ,0.0 ,0.0 ,0.0 ,-0.07,-0.51,-1.33,-2.07, 
+                    -2.63,-3.20,-3.94,-4.67,-5.32,-5.90,-6.42,-6.90,-7.33,-7.73])
+    two = np.array([-20.0,-9.05,-6.10,-3.75,-2.12,-0.84,-0.16, 
+                    -0.02,-0.01,-0.05,-0.34,-0.96,-1.60,-2.16,-2.63,-3.03,-3.38,-3.68,-3.94])
+    abhe=0.1
+    tlog=np.log10(t)
+    f1=10.**(weno4(tlog,temperature,one))
+    f2=10.**(weno4(tlog,temperature,two))
+    he1=toth*abhe*f1
+    he2=toth*abhe*f2
+    alfa=1.-f1-f2
+    alfa[alfa < 0.0]=1.e-30
+    alfa=toth*abhe*alfa
+    return he1, he2, alfa
+
+@dataclass
+class Ar85Che(CollisionalRates):
+    t1: float
+    t2: float
+    a: float
+    b: float
+    c: float
+    d: float
+
+    # AR85-CHE in Radyn. There's a bit of a mixup over whether these are up or down rates. But the paper is clear that the non-p (i.e. with non-ionised H/He) is recombination.
+
+    def setup(self, atom):
+        i, j = self.i, self.j
+        self.i = min(i, j)
+        self.j = max(i, j)
+        self.atom = atom
+        self.iLevel = atom.levels[self.i]
+        self.jLevel = atom.levels[self.j]
+
+    def __repr__(self):
+        s = f'{type(self).__name__}(j={self.j}, i={self.i}, t1={self.t1}, t2={self.t2}, a={self.a}, b={self.b}, c={self.c}, d={self.d})' 
+        return s
+
+    def compute_rates(self, atmos, eqPops, Cmat):
+        mask = (atmos.temperature >= self.t1) & (atmos.temperature <= self.t2)
+        t4 = atmos.temperature * 1e-4
+        toth = atmos.nHTot
+        he1, _, _ = hepop(atmos.temperature, toth)
+        cDown = self.a * 1e-9 * t4**self.b * (1.0 + self.c*np.exp(self.d * t4)) * he1 * lw.CM_TO_M**3
+
+        Cmat[self.i, self.j, mask] += cDown[mask]
+
+@dataclass
+class Ar85Chep(CollisionalRates):
+    t1: float
+    t2: float
+    a: float
+    b: float
+    c: float
+    d: float
+
+    # AR85-CHE+/CHP in Radyn. There's a bit of a mixup over whether these are up or down rates. But the paper is clear that the non-p (i.e. with non-ionised H/He) is recombination.
+
+    def setup(self, atom):
+        i, j = self.i, self.j
+        self.i = min(i, j)
+        self.j = max(i, j)
+        self.atom = atom
+        self.iLevel = atom.levels[self.i]
+        self.jLevel = atom.levels[self.j]
+
+    def __repr__(self):
+        s = f'{type(self).__name__}(j={self.j}, i={self.i}, t1={self.t1}, t2={self.t2}, a={self.a}, b={self.b}, c={self.c}, d={self.d})' 
+        return s
+
+    def compute_rates(self, atmos, eqPops, Cmat):
+        mask = (atmos.temperature >= self.t1) & (atmos.temperature <= self.t2)
+        t4 = atmos.temperature * 1e-4
+        toth = atmos.nHTot
+        he1, he2, _ = hepop(atmos.temperature, toth)
+
+        cUp = self.a * 1e-9 * t4**self.b * np.exp(-self.c * t4) * np.exp(-self.d * lw.EV / lw.KBoltzmann / atmos.temperature) * he2 * lw.CM_TO_M**3
+
+        Cmat[self.j, self.i, mask] += cUp[mask]
 
 Si_30_gkerr_update = lambda: AtomicModel(element=lw.Element(Z=14),
 	levels=[
@@ -428,20 +443,23 @@ Si_30_gkerr_update = lambda: AtomicModel(element=lw.Element(Z=14),
 		VoigtLine(j=25, i=20, f=2.403e-01, type=LineType.CRD, quadrature=LinearCoreExpWings(qCore=6.425, qWing=25.7, Nlambda=30), broadening=LineBroadening(natural=[RadiativeBroadening(gamma=2.28e+09)], elastic=[VdwRadyn(vals=[0.0])])),
 		VoigtLine(j=24, i=21, f=1.444e-01, type=LineType.CRD, quadrature=LinearCoreExpWings(qCore=6.425, qWing=25.7, Nlambda=30), broadening=LineBroadening(natural=[RadiativeBroadening(gamma=2.28e+09)], elastic=[VdwRadyn(vals=[0.0])])),
 		VoigtLine(j=25, i=21, f=4.325e-01, type=LineType.CRD, quadrature=LinearCoreExpWings(qCore=6.425, qWing=25.7, Nlambda=30), broadening=LineBroadening(natural=[RadiativeBroadening(gamma=2.28e+09)], elastic=[VdwRadyn(vals=[0.0])])),
-		VoigtLine(j=27, i=26, f=2.689e-01, type=LineType.PRD, quadrature=LinearCoreExpWings(qCore=6.425, qWing=128.5, Nlambda=90), broadening=LineBroadening(natural=[RadiativeBroadening(gamma=9.12e+08)], elastic=[VdwRadyn(vals=[0.0])])),
-		VoigtLine(j=28, i=26, f=5.417e-01, type=LineType.PRD, quadrature=LinearCoreExpWings(qCore=6.425, qWing=128.5, Nlambda=90), broadening=LineBroadening(natural=[RadiativeBroadening(gamma=9.3e+08)], elastic=[VdwRadyn(vals=[0.0])])),
+		VoigtLine(j=27, i=26, f=2.689e-01, type=LineType.CRD, quadrature=LinearCoreExpWings(qCore=6.425, qWing=128.5, Nlambda=90), broadening=LineBroadening(natural=[RadiativeBroadening(gamma=9.12e+08)], elastic=[VdwRadyn(vals=[0.0])])),
+		VoigtLine(j=28, i=26, f=5.417e-01, type=LineType.CRD, quadrature=LinearCoreExpWings(qCore=6.425, qWing=128.5, Nlambda=90), broadening=LineBroadening(natural=[RadiativeBroadening(gamma=9.3e+08)], elastic=[VdwRadyn(vals=[0.0])])),
 	],
 	continua=[
+        # NOTE(cmo): Two continua removed due to negative edges in gkerr model.
 		ExplicitContinuum(j=7, i=0, wavelengthGrid=[39.88, 42.85, 47.33, 50.4, 53.702999999999996, 58.435, 62.55800000000001, 67.61, 72.0, 73.6, 75.0, 78.0, 82.0, 84.0, 87.49, 91.17, 91.2, 94.977, 97.256, 99.0, 101.0, 104.42, 107.0, 110.016, 110.093, 110.1, 115.0, 118.0, 119.9, 120.1, 121.84, 123.881, 123.978, 124.0, 126.5, 129.45499999999998, 132.0, 133.5, 135.0, 136.0, 138.0, 139.375, 140.277, 142.0, 144.0, 146.0, 148.0, 149.0, 150.0, 151.449], alphaGrid=[3.42e-23, 4.08e-23, 5.260000000000001e-23, 6.2e-23, 7.32e-23, 9.15e-23, 1.29e-22, 2.2e-22, 3.78e-22, 3.77e-22, 3.2e-22, 5.1e-22, 6.460000000000001e-22, 7.23e-22, 8.55e-22, 1.08e-21, 1.08e-21, 1.0900000000000001e-21, 1.46e-21, 9.68e-22, 1.4500000000000002e-21, 2.1e-21, 6.56e-22, 1.4200000000000002e-21, 1.43e-21, 1.43e-21, 2.05e-21, 2.35e-21, 2.54e-21, 2.56e-21, 2.74e-21, 2.9400000000000003e-21, 2.95e-21, 2.9600000000000004e-21, 3.2000000000000005e-21, 3.51e-21, 3.75e-21, 3.85e-21, 3.94e-21, 4.0000000000000004e-21, 4.13e-21, 4.22e-21, 4.27e-21, 4.38e-21, 4.5e-21, 4.57e-21, 4.61e-21, 4.6300000000000004e-21, 4.65e-21, 4.67e-21]),
 		ExplicitContinuum(j=7, i=1, wavelengthGrid=[36.28, 39.88, 42.85, 47.33, 50.4, 53.702999999999996, 58.435, 62.55800000000001, 67.61, 72.0, 75.0, 78.0, 82.0, 84.0, 87.49, 91.17, 91.2, 94.977, 97.256, 99.0, 101.0, 104.42, 107.0, 110.016, 110.093, 110.1, 115.0, 118.0, 119.9, 120.1, 121.84, 123.881, 123.978, 124.0, 126.5, 129.45499999999998, 130.927, 133.5, 135.0, 136.0, 138.0, 139.375, 140.277, 142.0, 144.0, 146.0, 148.0, 149.0, 150.0, 151.626], alphaGrid=[2.72e-23, 3.42e-23, 4.08e-23, 5.260000000000001e-23, 6.2e-23, 7.32e-23, 9.15e-23, 1.29e-22, 2.2e-22, 3.78e-22, 3.2e-22, 5.1e-22, 6.460000000000001e-22, 7.23e-22, 8.55e-22, 1.08e-21, 1.08e-21, 1.0900000000000001e-21, 1.46e-21, 9.68e-22, 1.4500000000000002e-21, 2.1e-21, 6.56e-22, 1.4200000000000002e-21, 1.43e-21, 1.43e-21, 2.05e-21, 2.35e-21, 2.54e-21, 2.56e-21, 2.74e-21, 2.9400000000000003e-21, 2.95e-21, 2.9600000000000004e-21, 3.2000000000000005e-21, 3.51e-21, 3.65e-21, 3.85e-21, 3.94e-21, 4.0000000000000004e-21, 4.13e-21, 4.22e-21, 4.27e-21, 4.38e-21, 4.5e-21, 4.57e-21, 4.61e-21, 4.6300000000000004e-21, 4.65e-21, 4.67e-21]),
 		ExplicitContinuum(j=7, i=2, wavelengthGrid=[36.28, 39.88, 42.85, 47.33, 50.4, 53.702999999999996, 58.435, 62.55800000000001, 67.61, 72.0, 75.0, 78.0, 82.0, 84.0, 87.49, 91.17, 91.2, 94.977, 97.256, 99.0, 101.0, 104.42, 107.0, 110.016, 110.093, 110.1, 115.0, 118.0, 119.9, 120.1, 123.881, 123.978, 124.0, 126.5, 129.45499999999998, 130.927, 133.5, 136.0, 138.0, 140.277, 142.0, 144.0, 146.0, 148.0, 149.0, 150.0, 151.0, 151.793, 151.9, 151.962, 151.9624068103837], alphaGrid=[2.72e-23, 3.42e-23, 4.08e-23, 5.260000000000001e-23, 6.2e-23, 7.32e-23, 9.15e-23, 1.29e-22, 2.2e-22, 3.78e-22, 3.2e-22, 5.1e-22, 6.460000000000001e-22, 7.23e-22, 8.55e-22, 1.08e-21, 1.08e-21, 1.0900000000000001e-21, 1.46e-21, 9.68e-22, 1.4500000000000002e-21, 2.1e-21, 6.56e-22, 1.4200000000000002e-21, 1.43e-21, 1.43e-21, 2.05e-21, 2.35e-21, 2.54e-21, 2.56e-21, 2.9400000000000003e-21, 2.95e-21, 2.9600000000000004e-21, 3.2000000000000005e-21, 3.51e-21, 3.65e-21, 3.85e-21, 4.0000000000000004e-21, 4.13e-21, 4.27e-21, 4.38e-21, 4.5e-21, 4.57e-21, 4.61e-21, 4.6300000000000004e-21, 4.65e-21, 4.66e-21, 4.67e-21, 4.67e-21, 4.67e-21, 4.67e-21]),
 		ExplicitContinuum(j=7, i=3, wavelengthGrid=[42.85, 47.33, 50.4, 53.702999999999996, 58.435, 62.55800000000001, 67.61, 70.75, 76.0, 80.0, 82.0, 84.0, 86.03, 88.0, 91.17, 91.2, 92.0, 94.977, 97.256, 101.0, 106.0, 110.016, 110.093, 110.1, 114.0, 116.0, 119.9, 120.1, 123.881, 123.978, 124.0, 129.45499999999998, 132.0, 136.0, 138.0, 142.0, 144.0, 148.0, 150.0, 151.793, 151.9, 152.458, 152.5, 154.906, 158.0, 160.0, 162.0, 164.033, 165.728, 167.42000000000002], alphaGrid=[5.770000000000001e-23, 7.39e-23, 8.679999999999999e-23, 1.02e-22, 1.28e-22, 1.55e-22, 2.3900000000000003e-22, 3.2e-22, 4.62e-22, 7.1400000000000005e-22, 6.060000000000001e-22, 6.5900000000000005e-22, 9.68e-22, 8.230000000000001e-22, 1.2e-21, 1.19e-21, 1.0600000000000001e-21, 1.71e-21, 2.9000000000000004e-21, 9.590000000000001e-22, 1.72e-21, 2.2700000000000004e-21, 2.28e-21, 2.29e-21, 3.0900000000000003e-21, 3.6800000000000004e-21, 5.29e-21, 5.3700000000000006e-21, 6.240000000000001e-21, 6.240000000000001e-21, 6.23e-21, 5.2500000000000005e-21, 4.72e-21, 3.9800000000000006e-21, 3.67e-21, 3.21e-21, 3.0399999999999998e-21, 2.77e-21, 2.67e-21, 2.6100000000000004e-21, 2.6100000000000004e-21, 2.59e-21, 2.5800000000000004e-21, 2.51e-21, 2.42e-21, 2.39e-21, 2.37e-21, 2.35e-21, 2.33e-21, 2.32e-21]),
 		ExplicitContinuum(j=7, i=4, wavelengthGrid=[42.85, 47.33, 51.589999999999996, 56.17999999999999, 60.36, 65.0, 70.0, 75.0, 78.0, 82.0, 84.0, 91.17, 91.2, 97.256, 99.0, 102.572, 106.0, 110.016, 110.093, 110.1, 115.0, 119.9, 120.1, 123.881, 123.978, 124.0, 132.0, 135.0, 140.277, 144.0, 148.0, 151.793, 151.9, 152.458, 152.5, 158.0, 162.0, 167.42000000000002, 168.2, 168.22899999999998, 168.25, 171.91199999999998, 176.75, 176.85, 180.0, 183.0, 187.0, 190.768, 193.09, 197.494], alphaGrid=[1.0700000000000002e-22, 1.3e-22, 1.56e-22, 1.88e-22, 2.28e-22, 3.28e-22, 4.82e-22, 6.5e-22, 1.4e-21, 8.62e-22, 9.77e-22, 1.6300000000000001e-21, 1.64e-21, 1.73e-21, 2.82e-21, 6.670000000000001e-21, 2.11e-21, 2.71e-21, 2.7200000000000002e-21, 2.7200000000000002e-21, 3.34e-21, 4.3100000000000004e-21, 4.3600000000000006e-21, 5.57e-21, 5.610000000000001e-21, 5.6200000000000006e-21, 8.26e-21, 6.21e-21, 1.4500000000000002e-21, 3.41e-22, 1.0700000000000002e-22, 1.74e-22, 1.7800000000000003e-22, 1.97e-22, 1.98e-22, 4.23e-22, 5.92e-22, 8.07e-22, 8.31e-22, 8.320000000000001e-22, 8.33e-22, 9.47e-22, 1.1e-21, 1.1e-21, 1.2e-21, 1.3e-21, 1.4200000000000002e-21, 1.5400000000000002e-21, 1.61e-21, 1.73e-21]),
+		# ExplicitContinuum(j=7, i=5, wavelengthGrid=[47.33, 52.239999999999995, 56.17999999999999, 58.435, 62.55800000000001, 67.61, 73.6, 78.0, 86.03, 91.17, 91.2, 94.977, 102.572, 110.016, 110.093, 110.1, 119.9, 120.1, 123.881, 123.978, 124.0, 134.0, 140.277, 151.793, 151.9, 152.458, 152.5, 167.42000000000002, 168.2, 168.22899999999998, 168.25, 176.75, 176.85, 190.768, 197.494, 198.62, 198.65, 206.9, 207.1, 220.0, 232.365, 240.0, 251.3, 251.4, 260.28000000000003, 266.52, 278.05, 285.3, 294.11, 299.2], alphaGrid=[1.09e-22, 1.46e-22, 1.82e-22, 2.05e-22, 2.5100000000000004e-22, 3.1700000000000003e-22, 4.09e-22, 4.870000000000001e-22, 7.270000000000001e-22, 9.66e-22, 9.67e-22, 1.1500000000000002e-21, 1.5300000000000002e-21, 1.9900000000000003e-21, 2.0000000000000002e-21, 2.0000000000000002e-21, 2.64e-21, 2.65e-21, 2.9000000000000004e-21, 2.9000000000000004e-21, 2.9000000000000004e-21, 3.55e-21, 3.58e-21, 3.58e-21, 3.58e-21, 3.58e-21, 3.58e-21, 3.59e-21, 3.59e-21, 3.59e-21, 3.59e-21, 3.59e-21, 3.59e-21, 3.59e-21, 3.59e-21, 3.59e-21, 3.59e-21, 3.59e-21, 3.59e-21, 3.59e-21, 3.59e-21, 3.58e-21, 3.58e-21, 3.58e-21, 3.58e-21, 3.58e-21, 3.58e-21, 3.58e-21, 3.58e-21, 3.58e-21]),
 		ExplicitContinuum(j=6, i=0, wavelengthGrid=[36.28, 39.88, 42.85, 47.33, 50.4, 53.702999999999996, 58.435, 62.55800000000001, 65.0, 70.0, 76.2, 78.55, 82.0, 86.03, 88.82000000000001, 91.17, 91.2, 94.977, 101.0, 102.572, 107.0, 108.0, 110.016, 110.093, 110.1, 111.0, 116.0, 119.9, 120.1, 123.881, 123.978, 124.0, 126.5, 129.45499999999998, 132.0, 133.5, 136.0, 138.0, 140.277, 142.0, 144.0, 145.0, 146.0, 148.0, 149.0, 150.0, 151.0, 151.793, 151.9, 152.10999999999999, 152.11044264655985], alphaGrid=[8.81e-24, 1.1700000000000001e-23, 1.45e-23, 1.96e-23, 2.36e-23, 2.86e-23, 3.68e-23, 4.5000000000000003e-23, 5.3e-23, 9.14e-23, 1.9200000000000002e-22, 1.64e-22, 2.5900000000000003e-22, 3.3e-22, 3.8600000000000003e-22, 4.31e-22, 4.31e-22, 5.39e-22, 6.490000000000001e-22, 5.090000000000001e-22, 1.0300000000000001e-21, 1.01e-21, 3.52e-22, 3.41e-22, 3.41e-22, 3.79e-22, 9.180000000000002e-22, 1.1200000000000002e-21, 1.13e-21, 1.32e-21, 1.32e-21, 1.32e-21, 1.4500000000000002e-21, 1.61e-21, 1.74e-21, 1.8100000000000002e-21, 1.92e-21, 1.98e-21, 2.05e-21, 2.11e-21, 2.16e-21, 2.2e-21, 2.23e-21, 2.28e-21, 2.29e-21, 2.3000000000000004e-21, 2.31e-21, 2.31e-21, 2.32e-21, 2.32e-21, 2.32e-21]),
 		ExplicitContinuum(j=6, i=1, wavelengthGrid=[42.85, 45.31, 49.010000000000005, 52.239999999999995, 56.17999999999999, 58.435, 62.55800000000001, 67.61, 73.6, 76.2, 80.0, 82.0, 86.03, 88.82000000000001, 91.17, 91.2, 94.977, 97.702, 101.0, 102.572, 107.0, 108.0, 110.016, 110.093, 110.1, 111.0, 113.0, 116.0, 119.9, 120.1, 123.881, 123.978, 124.0, 126.5, 129.45499999999998, 132.0, 133.5, 136.0, 138.0, 140.277, 142.0, 144.0, 145.0, 146.0, 148.0, 150.0, 151.0, 151.793, 151.9, 152.28900000000002, 152.28907768571955], alphaGrid=[1.45e-23, 1.72e-23, 2.18e-23, 2.6300000000000004e-23, 3.2700000000000007e-23, 3.68e-23, 4.5000000000000003e-23, 7.04e-23, 1.35e-22, 1.9200000000000002e-22, 1.8999999999999999e-22, 2.5900000000000003e-22, 3.3e-22, 3.8600000000000003e-22, 4.31e-22, 4.31e-22, 5.39e-22, 5.300000000000001e-22, 6.490000000000001e-22, 5.090000000000001e-22, 1.0300000000000001e-21, 1.01e-21, 3.52e-22, 3.41e-22, 3.41e-22, 3.79e-22, 6.9e-22, 9.180000000000002e-22, 1.1200000000000002e-21, 1.13e-21, 1.32e-21, 1.32e-21, 1.32e-21, 1.4500000000000002e-21, 1.61e-21, 1.74e-21, 1.8100000000000002e-21, 1.92e-21, 1.98e-21, 2.05e-21, 2.11e-21, 2.16e-21, 2.2e-21, 2.23e-21, 2.28e-21, 2.3000000000000004e-21, 2.31e-21, 2.31e-21, 2.31e-21, 2.32e-21, 2.32e-21]),
 		ExplicitContinuum(j=6, i=2, wavelengthGrid=[39.88, 42.85, 47.33, 50.4, 53.702999999999996, 58.435, 62.55800000000001, 65.0, 70.0, 76.2, 78.55, 82.0, 86.03, 91.17, 91.2, 97.702, 101.0, 102.572, 107.0, 108.0, 110.016, 110.093, 110.1, 111.0, 113.0, 116.0, 119.9, 120.1, 123.881, 123.978, 124.0, 126.5, 128.0, 130.43699999999998, 132.0, 133.5, 136.0, 138.0, 140.277, 142.0, 144.0, 145.0, 146.0, 148.0, 150.0, 151.793, 151.9, 152.458, 152.5, 152.629], alphaGrid=[1.1700000000000001e-23, 1.45e-23, 1.96e-23, 2.36e-23, 2.86e-23, 3.68e-23, 4.5000000000000003e-23, 5.3e-23, 9.14e-23, 1.9200000000000002e-22, 1.64e-22, 2.5900000000000003e-22, 3.3e-22, 4.31e-22, 4.31e-22, 5.300000000000001e-22, 6.490000000000001e-22, 5.090000000000001e-22, 1.0300000000000001e-21, 1.01e-21, 3.52e-22, 3.41e-22, 3.41e-22, 3.79e-22, 6.9e-22, 9.180000000000002e-22, 1.1200000000000002e-21, 1.13e-21, 1.32e-21, 1.32e-21, 1.32e-21, 1.4500000000000002e-21, 1.5300000000000002e-21, 1.6600000000000001e-21, 1.74e-21, 1.8100000000000002e-21, 1.92e-21, 1.98e-21, 2.05e-21, 2.11e-21, 2.16e-21, 2.2e-21, 2.23e-21, 2.28e-21, 2.3000000000000004e-21, 2.31e-21, 2.31e-21, 2.32e-21, 2.32e-21, 2.32e-21]),
 		ExplicitContinuum(j=6, i=3, wavelengthGrid=[42.85, 47.33, 50.4, 53.702999999999996, 58.435, 62.55800000000001, 67.61, 72.0, 78.0, 80.0, 84.0, 87.49, 91.17, 91.2, 94.977, 97.702, 101.0, 104.42, 110.016, 110.093, 110.1, 114.0, 116.85999999999999, 119.9, 120.1, 123.881, 123.978, 124.0, 125.527, 128.0, 132.0, 136.0, 140.277, 144.0, 146.0, 148.0, 151.793, 151.9, 152.458, 152.5, 154.906, 156.081, 158.0, 160.0, 162.0, 164.033, 165.728, 167.42000000000002, 168.2, 168.22899999999998], alphaGrid=[1.96e-23, 2.6400000000000002e-23, 3.1900000000000003e-23, 3.8600000000000004e-23, 4.9700000000000007e-23, 6.1e-23, 7.79e-23, 1.16e-22, 1.61e-22, 2.13e-22, 3.59e-22, 3.07e-22, 4.65e-22, 4.630000000000001e-22, 6.11e-22, 4.92e-22, 1.4800000000000002e-21, 4.82e-22, 8.74e-22, 8.790000000000001e-22, 8.8e-22, 1.16e-21, 1.4500000000000002e-21, 1.89e-21, 1.92e-21, 2.73e-21, 2.7500000000000003e-21, 2.76e-21, 3.01e-21, 3.1e-21, 2.7200000000000002e-21, 2.3000000000000004e-21, 1.9099999999999998e-21, 1.67e-21, 1.5700000000000002e-21, 1.5000000000000001e-21, 1.37e-21, 1.37e-21, 1.35e-21, 1.35e-21, 1.31e-21, 1.28e-21, 1.2500000000000001e-21, 1.2200000000000001e-21, 1.2e-21, 1.2e-21, 1.18e-21, 1.17e-21, 1.17e-21, 1.17e-21]),
 		ExplicitContinuum(j=6, i=4, wavelengthGrid=[53.702999999999996, 58.435, 62.55800000000001, 67.61, 73.6, 78.0, 86.03, 88.82000000000001, 91.17, 91.2, 94.977, 103.0, 107.0, 110.016, 110.093, 110.1, 112.0, 113.0, 115.0, 116.0, 119.9, 120.1, 123.881, 123.978, 124.0, 129.45499999999998, 133.5, 138.0, 142.0, 148.0, 151.793, 151.9, 152.458, 152.5, 154.906, 160.0, 167.42000000000002, 168.2, 168.22899999999998, 168.25, 171.91199999999998, 176.75, 176.85, 180.0, 185.0, 187.0, 190.768, 195.0, 197.494, 198.62, 198.62024080082406], alphaGrid=[4.46e-23, 5.74e-23, 7.04e-23, 8.88e-23, 1.22e-22, 1.7800000000000003e-22, 3.06e-22, 6.6e-22, 5.65e-22, 5.6100000000000005e-22, 4.95e-22, 8.68e-22, 8.14e-22, 1.85e-21, 1.9000000000000003e-21, 1.9000000000000003e-21, 3.2300000000000005e-21, 3.2000000000000005e-21, 1.2600000000000002e-21, 1.0600000000000001e-21, 1.37e-21, 1.38e-21, 1.62e-21, 1.6300000000000001e-21, 1.6300000000000001e-21, 2.1800000000000003e-21, 2.86e-21, 3.9e-21, 3.910000000000001e-21, 1.04e-21, 2.4300000000000005e-22, 2.32e-22, 1.8399999999999998e-22, 1.81e-22, 7.23e-23, 8.31e-23, 2.35e-22, 2.52e-22, 2.5300000000000003e-22, 2.5300000000000003e-22, 3.33e-22, 4.23e-22, 4.25e-22, 4.74e-22, 5.55e-22, 5.870000000000001e-22, 6.47e-22, 7.1400000000000005e-22, 7.54e-22, 7.720000000000001e-22, 7.720000000000001e-22]),
+		# ExplicitContinuum(j=6, i=5, wavelengthGrid=[45.31, 49.010000000000005, 51.589999999999996, 56.17999999999999, 60.0, 65.0, 70.0, 76.2, 82.0, 85.0, 91.17, 91.2, 99.0, 104.42, 110.016, 110.093, 110.1, 119.9, 120.1, 123.881, 123.978, 124.0, 129.895, 140.277, 151.793, 151.9, 152.458, 152.5, 167.42000000000002, 168.2, 168.22899999999998, 168.25, 176.75, 176.85, 190.768, 197.494, 198.62, 198.65, 206.9, 207.1, 220.0, 232.365, 240.0, 251.3, 251.4, 266.52, 278.05, 285.3, 294.11, 308.0], alphaGrid=[4.78e-23, 6.04e-23, 7.050000000000001e-23, 9.1e-23, 1.1100000000000002e-22, 1.4100000000000001e-22, 1.76e-22, 2.27e-22, 2.8600000000000005e-22, 3.41e-22, 4.83e-22, 4.83e-22, 6.770000000000001e-22, 8.190000000000001e-22, 1.0000000000000001e-21, 1.0000000000000001e-21, 1.0000000000000001e-21, 1.32e-21, 1.3300000000000001e-21, 1.4500000000000002e-21, 1.4500000000000002e-21, 1.4500000000000002e-21, 1.65e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21, 1.79e-21]),
 		ExplicitContinuum(j=18, i=6, wavelengthGrid=[16.369999999999997, 18.0, 18.71, 19.35, 19.94, 20.47, 20.95, 21.39, 22.15, 22.78, 23.64, 24.303, 25.631999999999998, 26.669999999999998, 29.43, 30.377999999999997, 31.243000000000002, 31.93, 34.21, 36.28, 38.17, 39.88, 41.44, 42.85, 44.14, 45.31, 46.37, 47.33, 48.21, 49.010000000000005, 49.739999999999995, 50.4, 51.589999999999996, 52.239999999999995, 53.702999999999996, 56.17999999999999, 58.435, 59.141, 60.0, 60.141999999999996, 60.36, 62.55800000000001, 64.16, 65.0, 67.61, 70.0, 70.75, 72.0, 73.6, 75.0, 75.85514040930612], alphaGrid=[7.78e-24, 1.0300000000000001e-23, 1.1600000000000001e-23, 1.2799999999999999e-23, 1.4100000000000002e-23, 1.52e-23, 1.63e-23, 1.73e-23, 1.9200000000000001e-23, 2.09e-23, 2.33e-23, 2.5400000000000003e-23, 2.9800000000000005e-23, 3.3500000000000004e-23, 4.5000000000000003e-23, 4.96e-23, 5.380000000000001e-23, 5.640000000000001e-23, 5.87e-23, 6.39e-23, 5.550000000000001e-23, 5.490000000000001e-23, 5.41e-23, 4.69e-23, 5.0600000000000005e-23, 4.92e-23, 4.85e-23, 4.7700000000000004e-23, 4.7900000000000005e-23, 4.2500000000000004e-23, 3.64e-23, 4.23e-23, 4.7499999999999997e-23, 4.08e-23, 5.53e-23, 3.03e-23, 3.88e-23, 4.44e-23, 5.53e-23, 5.56e-23, 5.52e-23, 4.1100000000000003e-23, 5.770000000000001e-23, 6.58e-23, 9.46e-23, 1.28e-22, 1.39e-22, 1.7900000000000002e-22, 2.87e-22, 8.92e-23, 8.92e-23]),
 		ExplicitContinuum(j=18, i=7, wavelengthGrid=[16.369999999999997, 18.0, 18.71, 19.35, 19.94, 20.47, 21.39, 22.15, 22.78, 23.64, 24.303, 25.631999999999998, 26.669999999999998, 29.43, 30.377999999999997, 31.243000000000002, 31.93, 34.21, 36.28, 38.17, 39.88, 41.44, 42.85, 44.14, 45.31, 46.37, 47.33, 48.21, 49.010000000000005, 49.739999999999995, 50.4, 51.589999999999996, 52.239999999999995, 53.702999999999996, 56.17999999999999, 58.435, 59.141, 60.0, 60.141999999999996, 60.36, 62.55800000000001, 64.16, 65.0, 67.61, 70.0, 70.75, 72.0, 73.6, 75.0, 76.0, 76.02075615991245], alphaGrid=[7.78e-24, 1.0300000000000001e-23, 1.1600000000000001e-23, 1.2799999999999999e-23, 1.4100000000000002e-23, 1.52e-23, 1.73e-23, 1.9200000000000001e-23, 2.09e-23, 2.33e-23, 2.5400000000000003e-23, 2.9800000000000005e-23, 3.3500000000000004e-23, 4.5000000000000003e-23, 4.96e-23, 5.380000000000001e-23, 5.640000000000001e-23, 5.87e-23, 6.39e-23, 5.550000000000001e-23, 5.490000000000001e-23, 5.41e-23, 4.69e-23, 5.0600000000000005e-23, 4.92e-23, 4.85e-23, 4.7700000000000004e-23, 4.7900000000000005e-23, 4.2500000000000004e-23, 3.64e-23, 4.23e-23, 4.7499999999999997e-23, 4.08e-23, 5.53e-23, 3.03e-23, 3.88e-23, 4.44e-23, 5.53e-23, 5.56e-23, 5.52e-23, 4.1100000000000003e-23, 5.770000000000001e-23, 6.58e-23, 9.46e-23, 1.28e-22, 1.39e-22, 1.7900000000000002e-22, 2.87e-22, 8.92e-23, 1.3800000000000001e-22, 1.3800000000000001e-22]),
 		ExplicitContinuum(j=18, i=8, wavelengthGrid=[29.43, 31.93, 34.21, 36.28, 38.17, 41.44, 42.85, 47.33, 50.4, 52.239999999999995, 53.702999999999996, 58.435, 60.0, 62.55800000000001, 65.0, 67.61, 70.0, 72.0, 73.6, 76.2, 78.0, 80.0, 80.7, 82.0, 82.65, 84.0, 85.0, 86.03, 87.49, 88.0, 88.82000000000001, 90.0, 91.0, 91.17, 91.2, 94.977, 97.256, 99.0, 101.0, 102.572, 104.42, 106.0, 107.0, 108.0, 109.0, 110.016, 110.093, 110.1, 111.0, 112.0, 112.35207473048811], alphaGrid=[3.17e-23, 4.04e-23, 4.9700000000000007e-23, 5.93e-23, 6.45e-23, 5.960000000000001e-23, 6.46e-23, 4.9700000000000007e-23, 4.96e-23, 6.270000000000001e-23, 5.33e-23, 8.47e-23, 1.21e-22, 1.0100000000000001e-22, 1.33e-22, 1.68e-22, 2.0800000000000002e-22, 2.35e-22, 2.3600000000000003e-22, 2.37e-22, 2.37e-22, 2.37e-22, 2.37e-22, 2.37e-22, 2.37e-22, 2.37e-22, 2.37e-22, 2.37e-22, 2.37e-22, 2.37e-22, 2.37e-22, 2.37e-22, 2.37e-22, 2.37e-22, 2.37e-22, 2.37e-22, 2.37e-22, 2.37e-22, 2.3600000000000003e-22, 2.3600000000000003e-22, 2.3600000000000003e-22, 2.3600000000000003e-22, 2.3600000000000003e-22, 2.3600000000000003e-22, 2.3600000000000003e-22, 2.3600000000000003e-22, 2.3600000000000003e-22, 2.3600000000000003e-22, 2.3600000000000003e-22, 2.3600000000000003e-22, 2.3600000000000003e-22]),
@@ -541,16 +559,16 @@ Si_30_gkerr_update = lambda: AtomicModel(element=lw.Element(Z=14),
 		Omega(j=25, i=24, temperature=[1000.0, 2511.89, 6309.57, 15848.9, 39810.7, 100000.0, 251189.0, 630958.0, 1584890.0, 3981080.0], rates=[4.93, 4.97, 5.01, 5.04, 5.01, 4.87, 4.63, 4.31, 4.01, 3.8]),
 		Omega(j=27, i=26, temperature=[1000.0, 2511.89, 6309.57, 15848.9, 39810.7, 100000.0, 251189.0, 630958.0, 1584890.0, 3981080.0], rates=[6.44, 6.46, 6.48, 6.52, 6.6, 6.74, 6.98, 7.36, 7.93, 8.69]),
 		Omega(j=28, i=26, temperature=[1000.0, 2511.89, 6309.57, 15848.9, 39810.7, 100000.0, 251189.0, 630958.0, 1584890.0, 3981080.0], rates=[12.8, 12.8, 12.9, 13.0, 13.1, 13.4, 13.9, 14.7, 15.8, 17.3]),
-		Shull82(j=6, i=0, row=0, col=0, aCol=0.000000e+00, tCol=9.460000e+04, aRad=0.000000e+00, xRad=6.010000e-01, aDi=1.220000e-04, bDi=0.000000e+00, t0=7.700000e+04, t1=0.000000e+00),
-		Shull82(j=7, i=0, row=0, col=0, aCol=0.000000e+00, tCol=9.460000e+04, aRad=0.000000e+00, xRad=6.010000e-01, aDi=1.220000e-04, bDi=0.000000e+00, t0=7.700000e+04, t1=0.000000e+00),
-		Shull82(j=6, i=1, row=0, col=0, aCol=0.000000e+00, tCol=9.460000e+04, aRad=0.000000e+00, xRad=6.010000e-01, aDi=3.670000e-04, bDi=0.000000e+00, t0=7.700000e+04, t1=0.000000e+00),
-		Shull82(j=7, i=1, row=0, col=0, aCol=0.000000e+00, tCol=9.460000e+04, aRad=0.000000e+00, xRad=6.010000e-01, aDi=3.670000e-04, bDi=0.000000e+00, t0=7.700000e+04, t1=0.000000e+00),
-		Shull82(j=6, i=2, row=0, col=0, aCol=0.000000e+00, tCol=9.460000e+04, aRad=0.000000e+00, xRad=6.010000e-01, aDi=6.110000e-04, bDi=0.000000e+00, t0=7.700000e+04, t1=0.000000e+00),
-		Shull82(j=7, i=2, row=0, col=0, aCol=0.000000e+00, tCol=9.460000e+04, aRad=0.000000e+00, xRad=6.010000e-01, aDi=6.110000e-04, bDi=0.000000e+00, t0=7.700000e+04, t1=0.000000e+00),
-		Shull82(j=18, i=6, row=0, col=0, aCol=0.000000e+00, tCol=1.900000e+05, aRad=0.000000e+00, xRad=7.860000e-01, aDi=1.960000e-03, bDi=7.530000e-01, t0=9.630000e+04, t1=6.460000e+04),
-		Shull82(j=18, i=7, row=0, col=0, aCol=0.000000e+00, tCol=1.900000e+05, aRad=0.000000e+00, xRad=7.860000e-01, aDi=3.910000e-03, bDi=7.530000e-01, t0=9.630000e+04, t1=6.460000e+04),
-		Shull82(j=26, i=18, row=0, col=0, aCol=0.000000e+00, tCol=3.880000e+05, aRad=0.000000e+00, xRad=6.930000e-01, aDi=5.030000e-03, bDi=1.880000e-01, t0=8.750000e+04, t1=4.710000e+04),
-		Shull82(j=29, i=26, row=0, col=0, aCol=0.000000e+00, tCol=5.240000e+05, aRad=0.000000e+00, xRad=8.210000e-01, aDi=5.430000e-03, bDi=4.500000e-01, t0=1.050000e+06, t1=7.980000e+05),
+		Shull82(j=6, i=0, aCol=0.000000e+00, tCol=9.460000e+04, aRad=0.000000e+00, xRad=6.010000e-01, aDi=1.220000e-04, bDi=0.000000e+00, t0=7.700000e+04, t1=0.000000e+00, summers_scaling=1.000000e+00),
+		Shull82(j=7, i=0, aCol=0.000000e+00, tCol=9.460000e+04, aRad=0.000000e+00, xRad=6.010000e-01, aDi=1.220000e-04, bDi=0.000000e+00, t0=7.700000e+04, t1=0.000000e+00, summers_scaling=1.000000e+00),
+		Shull82(j=6, i=1, aCol=0.000000e+00, tCol=9.460000e+04, aRad=0.000000e+00, xRad=6.010000e-01, aDi=3.670000e-04, bDi=0.000000e+00, t0=7.700000e+04, t1=0.000000e+00, summers_scaling=1.000000e+00),
+		Shull82(j=7, i=1, aCol=0.000000e+00, tCol=9.460000e+04, aRad=0.000000e+00, xRad=6.010000e-01, aDi=3.670000e-04, bDi=0.000000e+00, t0=7.700000e+04, t1=0.000000e+00, summers_scaling=1.000000e+00),
+		Shull82(j=6, i=2, aCol=0.000000e+00, tCol=9.460000e+04, aRad=0.000000e+00, xRad=6.010000e-01, aDi=6.110000e-04, bDi=0.000000e+00, t0=7.700000e+04, t1=0.000000e+00, summers_scaling=1.000000e+00),
+		Shull82(j=7, i=2, aCol=0.000000e+00, tCol=9.460000e+04, aRad=0.000000e+00, xRad=6.010000e-01, aDi=6.110000e-04, bDi=0.000000e+00, t0=7.700000e+04, t1=0.000000e+00, summers_scaling=1.000000e+00),
+		Shull82(j=18, i=6, aCol=0.000000e+00, tCol=1.900000e+05, aRad=0.000000e+00, xRad=7.860000e-01, aDi=1.960000e-03, bDi=7.530000e-01, t0=9.630000e+04, t1=6.460000e+04, summers_scaling=1.000000e+00),
+		Shull82(j=18, i=7, aCol=0.000000e+00, tCol=1.900000e+05, aRad=0.000000e+00, xRad=7.860000e-01, aDi=3.910000e-03, bDi=7.530000e-01, t0=9.630000e+04, t1=6.460000e+04, summers_scaling=1.000000e+00),
+		Shull82(j=26, i=18, aCol=0.000000e+00, tCol=3.880000e+05, aRad=0.000000e+00, xRad=6.930000e-01, aDi=5.030000e-03, bDi=1.880000e-01, t0=8.750000e+04, t1=4.710000e+04, summers_scaling=1.000000e+00),
+		Shull82(j=29, i=26, aCol=0.000000e+00, tCol=5.240000e+05, aRad=0.000000e+00, xRad=8.210000e-01, aDi=5.430000e-03, bDi=4.500000e-01, t0=1.050000e+06, t1=7.980000e+05, summers_scaling=1.000000e+00),
 		Ar85Cdi(j=6, i=0, cdi=[[8.1, 24.83, -16.47, 0.43, -18.2], [13.5, 17.93, -11.93, 0.47, -13.57]]),
 		Ar85Cdi(j=7, i=0, cdi=[[8.1, 49.67, -32.93, 0.87, -36.4], [13.5, 35.87, -23.87, 0.93, -27.13]]),
 		Ar85Cdi(j=6, i=1, cdi=[[8.09, 24.83, -16.47, 0.43, -18.2], [13.49, 17.93, -11.93, 0.47, -13.57]]),
@@ -560,6 +578,7 @@ Si_30_gkerr_update = lambda: AtomicModel(element=lw.Element(Z=14),
 		Ar85Cdi(j=18, i=6, cdi=[[16.3, 50.4, -33.4, 0.6, -36.9], [22.9, 55.1, -37.2, 1.4, -41.0]]),
 		Ar85Cdi(j=18, i=7, cdi=[[16.26, 50.4, -33.4, 0.6, -36.9], [22.86, 55.1, -37.2, 1.4, -41.0]]),
 		Ar85Cdi(j=26, i=18, cdi=[[33.5, 19.8, -5.7, 1.3, -11.9], [133.0, 66.7, -24.8, 18.7, -65.0], [176.6, 22.0, -7.2, 3.3, -20.9]]),
+		Ar85Cdi(j=29, i=26, cdi=[[45.1, 9.0, -3.0, 0.6, -5.8], [148.0, 66.7, -24.8, 18.7, -65.0], [193.5, 22.0, -7.2, 3.3, -20.9]]),
 		Ar85Cea(j=6, i=0, fudge=3.333000e-01),
 		Ar85Cea(j=7, i=0, fudge=6.667000e-01),
 		Ar85Cea(j=6, i=1, fudge=3.333000e-01),
@@ -574,18 +593,18 @@ Si_30_gkerr_update = lambda: AtomicModel(element=lw.Element(Z=14),
 		Ar85Ch(j=18, i=7, t1=300.0, t2=100000.0, a=5.0, b=0.28, c=0.0, d=0.0),
 		Ar85Ch(j=26, i=18, t1=300.0, t2=30000.0, a=0.41, b=0.0, c=0.0, d=0.0),
 		Ar85Ch(j=29, i=26, t1=1000.0, t2=30000.0, a=2.4, b=0.0, c=0.0, d=0.0),
-		Ar85Ch(j=6, i=0, t1=5000.0, t2=30000.0, a=0.00333, b=0.0, c=0.0, d=0.03),
-		Ar85Ch(j=7, i=0, t1=5000.0, t2=30000.0, a=0.00667, b=0.0, c=0.0, d=0.03),
-		Ar85Ch(j=6, i=1, t1=5000.0, t2=30000.0, a=0.00333, b=0.0, c=0.0, d=0.03),
-		Ar85Ch(j=7, i=1, t1=5000.0, t2=30000.0, a=0.00667, b=0.0, c=0.0, d=0.03),
-		Ar85Ch(j=6, i=2, t1=5000.0, t2=30000.0, a=0.00333, b=0.0, c=0.0, d=0.03),
-		Ar85Ch(j=7, i=2, t1=5000.0, t2=30000.0, a=0.00667, b=0.0, c=0.0, d=0.03),
-		Ar85Ch(j=18, i=6, t1=5000.0, t2=100000.0, a=1.7, b=0.32, c=0.0, d=2.74),
-		Ar85Ch(j=18, i=7, t1=5000.0, t2=100000.0, a=1.7, b=0.32, c=0.0, d=2.74),
-		Ar85Ch(j=26, i=18, t1=1000.0, t2=30000.0, a=0.95, b=0.75, c=0.0, d=0.0),
-		Ar85Ch(j=18, i=6, t1=10000.0, t2=300000.0, a=0.15, b=0.24, c=0.0, d=6.91),
-		Ar85Ch(j=18, i=7, t1=10000.0, t2=300000.0, a=0.15, b=0.24, c=0.0, d=6.91),
-		Ar85Ch(j=26, i=18, t1=10000.0, t2=300000.0, a=1.15, b=0.44, c=0.0, d=8.88),
+		Ar85Chp(j=6, i=0, t1=5000.0, t2=30000.0, a=0.00333, b=0.0, c=0.0, d=0.03),
+		Ar85Chp(j=7, i=0, t1=5000.0, t2=30000.0, a=0.00667, b=0.0, c=0.0, d=0.03),
+		Ar85Chp(j=6, i=1, t1=5000.0, t2=30000.0, a=0.00333, b=0.0, c=0.0, d=0.03),
+		Ar85Chp(j=7, i=1, t1=5000.0, t2=30000.0, a=0.00667, b=0.0, c=0.0, d=0.03),
+		Ar85Chp(j=6, i=2, t1=5000.0, t2=30000.0, a=0.00333, b=0.0, c=0.0, d=0.03),
+		Ar85Chp(j=7, i=2, t1=5000.0, t2=30000.0, a=0.00667, b=0.0, c=0.0, d=0.03),
+		Ar85Chp(j=18, i=6, t1=5000.0, t2=100000.0, a=1.7, b=0.32, c=0.0, d=2.74),
+		Ar85Chp(j=18, i=7, t1=5000.0, t2=100000.0, a=1.7, b=0.32, c=0.0, d=2.74),
+		Ar85Che(j=26, i=18, t1=1000.0, t2=30000.0, a=0.95, b=0.75, c=0.0, d=0.0),
+		Ar85Chep(j=18, i=6, t1=10000.0, t2=300000.0, a=0.15, b=0.24, c=0.0, d=6.91),
+		Ar85Chep(j=18, i=7, t1=10000.0, t2=300000.0, a=0.15, b=0.24, c=0.0, d=6.91),
+		Ar85Chep(j=26, i=18, t1=10000.0, t2=300000.0, a=1.15, b=0.44, c=0.0, d=8.88),
 		CI(j=6, i=3, temperature=[100.0, 1000000000.0], rates=[1.3500000000000002e-16, 1.3500000000000002e-16]),
 		CI(j=7, i=3, temperature=[100.0, 1000000000.0], rates=[2.6700000000000005e-16, 2.6700000000000005e-16]),
 		CI(j=6, i=4, temperature=[100.0, 1000000000.0], rates=[1.8800000000000002e-16, 1.8800000000000002e-16]),
@@ -611,4 +630,4 @@ Si_30_gkerr_update = lambda: AtomicModel(element=lw.Element(Z=14),
 		Burgess(j=26, i=25, fudge=1),
 		Burgess(j=29, i=27, fudge=1),
 		Burgess(j=29, i=28, fudge=1),
-])
+    ])
