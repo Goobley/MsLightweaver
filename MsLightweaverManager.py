@@ -327,11 +327,17 @@ class MsLightweaverManager:
         self.atmos.height[:] = self.atmost.z1[self.idx]
 
         for name, pops in step['eqPops'].items():
-            if pops['n'] is not None:
-                self.eqPops.atomicPops[name].pops[:] = pops['n']
-            self.eqPops.atomicPops[name].nStar[:] = pops['nStar']
+            try:
+                if pops['n'] is not None:
+                        self.eqPops.atomicPops[name].pops[:] = pops['n']
+                self.eqPops.atomicPops[name].nStar[:] = pops['nStar']
+            except KeyError:
+                continue
         self.atmos.ne[:] = step['ne']
-        self.ctx.spect.I[:] = step['Iwave']
+        try:
+            self.ctx.spect.I[:] = step['Iwave']
+        except ValueError:
+            pass
         self.ctx.update_deps()
 
     def increment_step(self):
@@ -431,7 +437,7 @@ class MsLightweaverManager:
 
             if sub > 1 and ((popsChange.dPopsMax < popsTol and dJ.dJMax < JTol)
                             or (popsChange.dPopsMax < 0.1*popsTol)):
-                if self.prd: 
+                if self.prd:
                     if self.updateRhoPrd  and dPrd.dRhoMax < popsTol:
                         break
                     else:
@@ -476,7 +482,7 @@ class MsLightweaverManager:
             while dJ > 1e-3:
                 dJ = self.ctx.formal_sol_gamma_matrices().dJMax
             Jstart = np.copy(self.ctx.spect.J)
-                
+
         self.atmos.temperature[k] += 0.5 * pertSize
         self.ctx.update_deps()
 
@@ -489,7 +495,7 @@ class MsLightweaverManager:
             self.ctx.spect.J[:] = Jstart
         else:
             self.ctx.spect.J[:] = 0.0
-        
+
         self.atmos.temperature[k] -= 0.5 * pertSize
         self.ctx.update_deps()
 
@@ -501,7 +507,7 @@ class MsLightweaverManager:
         minus = np.copy(self.ctx.spect.I[:, -1])
 
         return plus, minus
-    
+
     def rf_k_stat_eq(self, step, dt, pertSize, k, Jstart=None):
         self.load_timestep(step)
         print(pertSize)
@@ -517,7 +523,7 @@ class MsLightweaverManager:
             while dJ > 1e-3:
                 dJ = self.ctx.formal_sol_gamma_matrices().dJMax
             Jstart = np.copy(self.ctx.spect.J)
-                
+
         self.atmos.temperature[k] += 0.5 * pertSize
         self.ctx.update_deps()
 
@@ -525,9 +531,9 @@ class MsLightweaverManager:
         while True:
             self.ctx.formal_sol_gamma_matrices()
             dPops = self.ctx.stat_equil()
-            if dPops < 1e-5 and dPops != 0.0: 
+            if dPops < 1e-5 and dPops != 0.0:
                 break
-            
+
         plus = np.copy(self.ctx.spect.I[:, -1])
 
         self.load_timestep(step)
@@ -536,7 +542,7 @@ class MsLightweaverManager:
             self.ctx.spect.J[:] = Jstart
         else:
             self.ctx.spect.J[:] = 0.0
-        
+
         self.atmos.temperature[k] -= 0.5 * pertSize
         self.ctx.update_deps()
 
@@ -550,11 +556,11 @@ class MsLightweaverManager:
             dPops = self.ctx.stat_equil()
             if dPops < 1e-5 and dPops != 0.0:
                 break
-            
+
         minus = np.copy(self.ctx.spect.I[:, -1])
 
         return plus, minus
-    
+
     def rf_ne_k(self, step, dt, pertSizePercent, k, Jstart=None):
         self.load_timestep(step)
         print(pertSizePercent)
@@ -570,7 +576,7 @@ class MsLightweaverManager:
             while dJ > 1e-3:
                 dJ = self.ctx.formal_sol_gamma_matrices().dJMax
             Jstart = np.copy(self.ctx.spect.J)
-                
+
         self.atmos.ne[k] += 0.5 * pertSizePercent * self.atmos.ne[k]
         self.ctx.update_deps()
 
@@ -583,7 +589,7 @@ class MsLightweaverManager:
             self.ctx.spect.J[:] = Jstart
         else:
             self.ctx.spect.J[:] = 0.0
-        
+
         self.atmos.ne[k] -= 0.5 * pertSizePercent * self.atmos.ne[k]
         self.ctx.update_deps()
 
@@ -595,7 +601,7 @@ class MsLightweaverManager:
         minus = np.copy(self.ctx.spect.I[:, -1])
 
         return plus, minus
-    
+
     def rf_vlos_k(self, step, dt, pertSize, k, Jstart=None):
         self.load_timestep(step)
         print(pertSize)
@@ -611,7 +617,7 @@ class MsLightweaverManager:
             while dJ > 1e-3:
                 dJ = self.ctx.formal_sol_gamma_matrices().dJMax
             Jstart = np.copy(self.ctx.spect.J)
-                
+
         self.atmos.vlos[k] += 0.5 * pertSize
         self.ctx.update_deps()
 
@@ -624,7 +630,7 @@ class MsLightweaverManager:
             self.ctx.spect.J[:] = Jstart
         else:
             self.ctx.spect.J[:] = 0.0
-        
+
         self.atmos.vlos[k] -= 0.5 * pertSize
         self.ctx.update_deps()
 

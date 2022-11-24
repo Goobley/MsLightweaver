@@ -254,7 +254,7 @@ class Ar85Ch(CollisionalRates):
         self.jLevel = atom.levels[self.j]
 
     def __repr__(self):
-        s = f'{type(self).__name__}(j={self.j}, i={self.i}, t1={self.t1}, t2={self.t2}, a={self.a}, b={self.b}, c={self.c}, d={self.d})' 
+        s = f'{type(self).__name__}(j={self.j}, i={self.i}, t1={self.t1}, t2={self.t2}, a={self.a}, b={self.b}, c={self.c}, d={self.d})'
         return s
 
     def compute_rates(self, atmos, eqPops, Cmat):
@@ -284,7 +284,7 @@ class Ar85Chp(CollisionalRates):
         self.jLevel = atom.levels[self.j]
 
     def __repr__(self):
-        s = f'{type(self).__name__}(j={self.j}, i={self.i}, t1={self.t1}, t2={self.t2}, a={self.a}, b={self.b}, c={self.c}, d={self.d})' 
+        s = f'{type(self).__name__}(j={self.j}, i={self.i}, t1={self.t1}, t2={self.t2}, a={self.a}, b={self.b}, c={self.c}, d={self.d})'
         return s
 
     def compute_rates(self, atmos, eqPops, Cmat):
@@ -297,12 +297,15 @@ class Ar85Chp(CollisionalRates):
 
 def hepop(t, toth):
     # Ratio of helium ionisation fractions, from AR85.
-    temperature = np.array([3.50, 4.00, 4.10, 4.20, 4.30, 4.40, 4.50, 4.60, 
-                   4.70, 4.80, 4.90, 5.00, 5.10, 5.20, 5.30, 5.40, 
+    # NOTE(cmo): The spline used in RADYN linearly extrapolates off the end of
+    # this grid. I don't believe that to ever be an issue here, but if it is,
+    # weno4 simply clamps to the end values.
+    temperature = np.array([3.50, 4.00, 4.10, 4.20, 4.30, 4.40, 4.50, 4.60,
+                   4.70, 4.80, 4.90, 5.00, 5.10, 5.20, 5.30, 5.40,
                    5.50, 5.60, 5.70])
-    one = np.array([0.0, 0.0 ,0.0 ,0.0 ,0.0 ,-0.07,-0.51,-1.33,-2.07, 
+    one = np.array([0.0, 0.0 ,0.0 ,0.0 ,0.0 ,-0.07,-0.51,-1.33,-2.07,
                     -2.63,-3.20,-3.94,-4.67,-5.32,-5.90,-6.42,-6.90,-7.33,-7.73])
-    two = np.array([-20.0,-9.05,-6.10,-3.75,-2.12,-0.84,-0.16, 
+    two = np.array([-20.0,-9.05,-6.10,-3.75,-2.12,-0.84,-0.16,
                     -0.02,-0.01,-0.05,-0.34,-0.96,-1.60,-2.16,-2.63,-3.03,-3.38,-3.68,-3.94])
     abhe=0.1
     tlog=np.log10(t)
@@ -335,14 +338,19 @@ class Ar85Che(CollisionalRates):
         self.jLevel = atom.levels[self.j]
 
     def __repr__(self):
-        s = f'{type(self).__name__}(j={self.j}, i={self.i}, t1={self.t1}, t2={self.t2}, a={self.a}, b={self.b}, c={self.c}, d={self.d})' 
+        s = f'{type(self).__name__}(j={self.j}, i={self.i}, t1={self.t1}, t2={self.t2}, a={self.a}, b={self.b}, c={self.c}, d={self.d})'
         return s
 
     def compute_rates(self, atmos, eqPops, Cmat):
         mask = (atmos.temperature >= self.t1) & (atmos.temperature <= self.t2)
         t4 = atmos.temperature * 1e-4
         toth = atmos.nHTot
-        he1, _, _ = hepop(atmos.temperature, toth)
+        # NOTE(cmo): If we have non-eq He, use it.
+        if eqPops.atomicPops['He'].pops is not None:
+            he1 = eqPops['He'][0]
+        else:
+            he1, _, _ = hepop(atmos.temperature, toth)
+
         cDown = self.a * 1e-9 * t4**self.b * (1.0 + self.c*np.exp(self.d * t4)) * he1 * lw.CM_TO_M**3
 
         Cmat[self.i, self.j, mask] += cDown[mask]
@@ -367,14 +375,18 @@ class Ar85Chep(CollisionalRates):
         self.jLevel = atom.levels[self.j]
 
     def __repr__(self):
-        s = f'{type(self).__name__}(j={self.j}, i={self.i}, t1={self.t1}, t2={self.t2}, a={self.a}, b={self.b}, c={self.c}, d={self.d})' 
+        s = f'{type(self).__name__}(j={self.j}, i={self.i}, t1={self.t1}, t2={self.t2}, a={self.a}, b={self.b}, c={self.c}, d={self.d})'
         return s
 
     def compute_rates(self, atmos, eqPops, Cmat):
         mask = (atmos.temperature >= self.t1) & (atmos.temperature <= self.t2)
         t4 = atmos.temperature * 1e-4
         toth = atmos.nHTot
-        he1, he2, _ = hepop(atmos.temperature, toth)
+        # NOTE(cmo): If we have non-eq He, use it.
+        if eqPops.atomicPops['He'].pops is not None:
+            he2 = eqPops['He'][5]
+        else:
+            he1, he2, _ = hepop(atmos.temperature, toth)
 
         cUp = self.a * 1e-9 * t4**self.b * np.exp(-self.c * t4) * np.exp(-self.d * lw.EV / lw.KBoltzmann / atmos.temperature) * he2 * lw.CM_TO_M**3
 
@@ -602,6 +614,11 @@ Si_30_gkerr_update = lambda: AtomicModel(element=lw.Element(Z=14),
 		Ar85Chp(j=18, i=6, t1=5000.0, t2=100000.0, a=1.7, b=0.32, c=0.0, d=2.74),
 		Ar85Chp(j=18, i=7, t1=5000.0, t2=100000.0, a=1.7, b=0.32, c=0.0, d=2.74),
 		Ar85Che(j=26, i=18, t1=1000.0, t2=30000.0, a=0.95, b=0.75, c=0.0, d=0.0),
+        # NOTE(cmo): These are the CHep rates (CT /w He II that RADYN interprets as CT /w He I). So... correct to the letter of RADYN, rather than the spirit of the atom file.
+		# Ar85Che(j=18, i=6, t1=10000.0, t2=300000.0, a=0.15, b=0.24, c=0.0, d=6.91),
+		# Ar85Che(j=18, i=7, t1=10000.0, t2=300000.0, a=0.15, b=0.24, c=0.0, d=6.91),
+		# Ar85Che(j=26, i=18, t1=10000.0, t2=300000.0, a=1.15, b=0.44, c=0.0, d=8.88),
+        # NOTE(cmo): The intent of the atom file.
 		Ar85Chep(j=18, i=6, t1=10000.0, t2=300000.0, a=0.15, b=0.24, c=0.0, d=6.91),
 		Ar85Chep(j=18, i=7, t1=10000.0, t2=300000.0, a=0.15, b=0.24, c=0.0, d=6.91),
 		Ar85Chep(j=26, i=18, t1=10000.0, t2=300000.0, a=1.15, b=0.44, c=0.0, d=8.88),

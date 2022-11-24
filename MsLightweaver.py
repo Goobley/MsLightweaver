@@ -17,7 +17,7 @@ from ReadAtmost import read_atmost, read_atmost_cdf
 from RadynEmistab import EmisTable
 from Si30_gkerr_update import Si_30_gkerr_update as Si_30
 
-OutputDir = 'Timesteps_HSiNoConsPrd/'
+OutputDir = 'Timesteps_DetailedH_HeSi/'
 Path(OutputDir).mkdir(parents=True, exist_ok=True)
 Path(OutputDir + '/Rfs').mkdir(parents=True, exist_ok=True)
 Path(OutputDir + '/ContFn').mkdir(parents=True, exist_ok=True)
@@ -38,21 +38,25 @@ FchromaSiAtoms = [H_6(), CaII(), He_9_atom(), C_atom(), O_atom(), Si_30(), Fe_at
                   MgII_atom(), N_atom(), Na_atom(), S_atom()]
 NasaSiAtoms = [H_6_nasa(), CaII_nasa(), He_9_atom(), C_atom(), O_atom(), Si_30(), Fe_atom(),
                   MgII_atom(), N_atom(), Na_atom(), S_atom()]
-FchromaPrdSiAtoms = [H_6_prd(), CaII_prd(), He_9_atom(), C_atom(), O_atom(), Si_30(), Fe_atom(),
+si = Si_30()
+for l in si.lines[-2:]:
+    l.type = lw.atomic_model.LineType.PRD
+lw.reconfigure_atom(si)
+FchromaPrdSiAtoms = [H_6_prd(), CaII_prd(), He_9_atom(), C_atom(), O_atom(), si, Fe_atom(),
                   MgII_atom(), N_atom(), Na_atom(), S_atom()]
 
 AtomSet = FchromaPrdSiAtoms
 
 DisableFangRates = False
 ConserveCharge = False
-ConserveChargeHOnly = False
+ConserveChargeHOnly = True
 PopulationTransportMode = 'Advect'
-Prd = True
-DetailedH = False
+Prd = False
+DetailedH = True
 DetailedHPath = None
 # CoronalIrradiation = EmisTable('emistab.dat')
 CoronalIrradiation = None
-ActiveAtoms = ['H', 'Si']
+ActiveAtoms = ['H', 'He', 'Si']
 
 if DisableFangRates:
     # Removing Fang rates
@@ -61,7 +65,9 @@ if DisableFangRates:
 
 test_timesteps_in_dir(OutputDir)
 
-atmost = read_atmost_cdf('atmost.cdf')
+# atmost = read_atmost_cdf('atmost.cdf')
+atmost = read_atmost('atmost.dat', maxTimestep=9971)
+# atmost = read_atmost('atmost.dat')
 atmost.to_SI()
 # atmost = atmost.reinterpolate(maxTimestep=0.05)
 
@@ -106,11 +112,21 @@ if firstStep != 0:
     ms.ctx.formal_sol_gamma_matrices()
     firstStep += 1
 
+failRunLength = 0
 for i in range(firstStep, maxSteps):
     stepStart = time.time()
     if i != 0:
         ms.increment_step()
-    ms.time_dep_step(popsTol=1e-3, JTol=5e-3, nSubSteps=1000, theta=1.0)
+    try:
+        ms.time_dep_step(popsTol=1e-3, JTol=5e-3, nSubSteps=1000, theta=1.0)
+    except ValueError:
+        with open(OutputDir + '/Fails.txt', 'a') as f:
+            f.write(f"{i}\n")
+            failRunLength += 1
+            if failRunLength > 10:
+                raise ValueError("Too many consecutive fails")
+    else:
+        failRunLength = 0
     # ms.ctx.clear_ng()
     ms.save_timestep()
     stepEnd = time.time()

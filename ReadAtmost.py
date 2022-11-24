@@ -169,7 +169,7 @@ def read_atmost_cdf(filename) -> Atmost:
                   bheat1=None)
 
 
-def read_atmost(filename='atmost.dat') -> Atmost:
+def read_atmost(filename='atmost.dat', maxTimestep=None) -> Atmost:
     with open(filename, 'rb') as f:
         # Record: itype 4, isize 4, cname 8 : 16
         _ = np.fromfile(f, np.int32, 1)
@@ -209,6 +209,7 @@ def read_atmost(filename='atmost.dat') -> Atmost:
         vz1t = []
         nh1t = []
         bheat1t = []
+        i = 0
         while True:
             # Record: itype 4, isize 4, cname 8 : 16
             _ = np.fromfile(f, np.int32, 1)
@@ -241,6 +242,10 @@ def read_atmost(filename='atmost.dat') -> Atmost:
             if bheat:
                 bheat1t.append(np.fromfile(f, np.float64, ndep[0]))
             _ = np.fromfile(f, np.int32, 1)
+
+            if maxTimestep and i >= maxTimestep:
+                break
+            i += 1
 
     times = np.array(times).squeeze()
     dtns = np.array(dtns).squeeze()
