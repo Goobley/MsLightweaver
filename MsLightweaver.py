@@ -17,7 +17,7 @@ from ReadAtmost import read_atmost, read_atmost_cdf
 from RadynEmistab import EmisTable
 from Si30_gkerr_update import Si_30_gkerr_update as Si_30
 
-OutputDir = 'Timesteps_DetailedH_HeSi/'
+OutputDir = 'Timesteps_DetailedH_HeSi_CorrectedAtom/'
 Path(OutputDir).mkdir(parents=True, exist_ok=True)
 Path(OutputDir + '/Rfs').mkdir(parents=True, exist_ok=True)
 Path(OutputDir + '/ContFn').mkdir(parents=True, exist_ok=True)
@@ -34,10 +34,12 @@ FchromaNoLybbAtoms = [H_6_noLybb(), CaII(), He_9_atom(), C_atom(), O_atom(), Si_
 FchromaNoLybbbfAtoms = [H_6_noLybbbf(), CaII(), He_9_atom(), C_atom(), O_atom(), Si_atom(), Fe_atom(),
                 MgII_atom(), N_atom(), Na_atom(), S_atom()]
 FchromaNoHbbNoContAtoms = [H_6_nobb(), CaII(), He_9_atom()]
-FchromaSiAtoms = [H_6(), CaII(), He_9_atom(), C_atom(), O_atom(), Si_30(), Fe_atom(),
+FchromaSiAtoms = [H_6(), CaII(), He_9_atom(), Al_atom(), C_atom(), O_atom(), Si_30(), Fe_atom(),
                   MgII_atom(), N_atom(), Na_atom(), S_atom()]
 NasaSiAtoms = [H_6_nasa(), CaII_nasa(), He_9_atom(), C_atom(), O_atom(), Si_30(), Fe_atom(),
                   MgII_atom(), N_atom(), Na_atom(), S_atom()]
+# NOTE(cmo): Al background opacity had inadvertantly been ignored on most of
+# these. Won't have any significant difference other than a small UV window.
 si = Si_30()
 for l in si.lines[-2:]:
     l.type = lw.atomic_model.LineType.PRD
@@ -45,7 +47,7 @@ lw.reconfigure_atom(si)
 FchromaPrdSiAtoms = [H_6_prd(), CaII_prd(), He_9_atom(), C_atom(), O_atom(), si, Fe_atom(),
                   MgII_atom(), N_atom(), Na_atom(), S_atom()]
 
-AtomSet = FchromaPrdSiAtoms
+AtomSet = FchromaSiAtoms
 
 DisableFangRates = False
 ConserveCharge = False

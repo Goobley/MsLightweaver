@@ -60,7 +60,10 @@ def nr_advect(atmost, i0, eqPops, activeAtomNames, abundances):
     for a in activeAtomNames:
         pop = np.zeros_like(eqPops[a])
         for i in range(pop.shape[0]):
-            pop[i, :] = an_sol(atmost, i0, eqPops[a][i], tol=1e-8, maxIter=1000)
+            try:
+                pop[i, :] = an_sol(atmost, i0, eqPops[a][i], tol=1e-5, maxIter=10000)
+            except lw.ConvergenceError:
+                raise lw.ConvergenceError(f'Convergence failed for {a}, level {i}')
         nTotal = d1 / (abundances.massPerH * lw.Amu) * abundances[a]
         popCorrectionFactor = nTotal / pop.sum(axis=0)
         print('Max Correction %s: %.2e' % (a, np.abs(1-popCorrectionFactor).max()))

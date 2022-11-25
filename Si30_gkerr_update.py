@@ -614,11 +614,6 @@ Si_30_gkerr_update = lambda: AtomicModel(element=lw.Element(Z=14),
 		Ar85Chp(j=18, i=6, t1=5000.0, t2=100000.0, a=1.7, b=0.32, c=0.0, d=2.74),
 		Ar85Chp(j=18, i=7, t1=5000.0, t2=100000.0, a=1.7, b=0.32, c=0.0, d=2.74),
 		Ar85Che(j=26, i=18, t1=1000.0, t2=30000.0, a=0.95, b=0.75, c=0.0, d=0.0),
-        # NOTE(cmo): These are the CHep rates (CT /w He II that RADYN interprets as CT /w He I). So... correct to the letter of RADYN, rather than the spirit of the atom file.
-		# Ar85Che(j=18, i=6, t1=10000.0, t2=300000.0, a=0.15, b=0.24, c=0.0, d=6.91),
-		# Ar85Che(j=18, i=7, t1=10000.0, t2=300000.0, a=0.15, b=0.24, c=0.0, d=6.91),
-		# Ar85Che(j=26, i=18, t1=10000.0, t2=300000.0, a=1.15, b=0.44, c=0.0, d=8.88),
-        # NOTE(cmo): The intent of the atom file.
 		Ar85Chep(j=18, i=6, t1=10000.0, t2=300000.0, a=0.15, b=0.24, c=0.0, d=6.91),
 		Ar85Chep(j=18, i=7, t1=10000.0, t2=300000.0, a=0.15, b=0.24, c=0.0, d=6.91),
 		Ar85Chep(j=26, i=18, t1=10000.0, t2=300000.0, a=1.15, b=0.44, c=0.0, d=8.88),
